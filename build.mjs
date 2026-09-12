@@ -419,7 +419,7 @@ function detailPage(s, prev, next, canonical = '', related = []) {
       </figure>`
       }).join('')}
     </div>
-    <p class="stream-hint" id="streamHint">已加载 <span id="loadedCount">0</span> / ${s.previews.length} 张预览 · 滚动时自动加载并按加载顺序排列 · <b>点击图片打开画廊</b></p>
+    <p class="stream-hint" id="streamHint">已加载 <span id="loadedCount">0</span> / ${s.previews.length} 张预览 · 滚动时自动加载 · <b>点击图片打开画廊</b></p>
     ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张，以上为部分预览 · 完整图集请下载压缩包</p>` : ''}`
     : '<p class="empty">暂无预览图</p>'
 
@@ -566,10 +566,6 @@ img{max-width:100%;display:block}
   opacity:0;pointer-events:none;
   transition:transform .45s cubic-bezier(.22,.61,.36,1),opacity .45s ease,width .3s ease,height .3s ease;will-change:transform,width,height}
 .preview.placed{opacity:1;pointer-events:auto}
-/* 骨架屏：未落位占位（预测高度用，避免页面高度跳动） */
-.skeleton{position:absolute;top:0;left:0;border-radius:var(--radius);background:linear-gradient(100deg,var(--panel) 30%,var(--panel2) 50%,var(--panel) 70%);
-  background-size:220% 100%;animation:shimmer 1.4s infinite linear;opacity:.55;pointer-events:none}
-@keyframes shimmer{0%{background-position:120% 0}100%{background-position:-120% 0}}
 /* 图片加载失败占位 */
 .preview.failed{background:var(--panel2)}
 .preview.failed::before{content:'⚠ 图片加载失败';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:13px}
@@ -785,123 +781,81 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     }).catch(() => {});
   }
 
-  // 详情页：瀑布流（谁先加载完谁先落位；落位时塞进最矮的列/缝隙；宽图跨双列）
+  // 详情页：瀑布流
+  // 关键点：宽高比在构建时就写进 data-ratio，图片没加载也能算出最终高度 →
+  // 一次性把所有格子排完（与加载顺序无关），图片只负责淡入。
+  // 这样每次刷新的布局完全一致，也不会出现空洞 / 错行 / 高度乱跳。
   const gallery = document.getElementById('gallery');
   const loadedCount = document.getElementById('loadedCount');
   if (gallery) {
     const GAP = 16;
     const MIN_COL = 300;          // 单列最小宽度（决定列数）
     const items = [...gallery.querySelectorAll('.preview')];
-    const placedOrder = [];       // 已落位顺序（= 加载完成顺序）
-    let cols = 1, colW = 0, heights = [];
+    let cols = 1, colW = 0;
 
     const metrics = () => {
       const W = gallery.clientWidth || gallery.parentElement.clientWidth;
       cols = Math.max(1, Math.min(4, Math.floor((W + GAP) / (MIN_COL + GAP))));
       colW = (W - GAP * (cols - 1)) / cols;
-      heights = new Array(cols).fill(0);
     };
 
-    // 找最矮的列；宽图（横构图）尝试跨两列，取两列中较矮的对齐点
-    const findSlot = (hUnits, ratio) => {
-      const span = (cols >= 2 && ratio >= 1.25) ? 2 : 1;   // 横构图跨双列
-      let best = { col: 0, y: Infinity, span };
-      if (span === 2) {
-        for (let c = 0; c + 1 < cols; c++) {
-          const y = Math.max(heights[c], heights[c + 1]);
-          if (y < best.y) best = { col: c, y, span };
-        }
-        // 跨列如果比单列更靠下很多，就退回单列（避免长条空隙）
-        const single = Math.min(...heights);
-        if (best.y - single > 140) {
-          const c = heights.indexOf(single);
-          best = { col: c, y: single, span: 1 };
-        }
-      } else {
-        const single = Math.min(...heights);
-        best = { col: heights.indexOf(single), y: single, span: 1 };
-      }
-      return best;
-    };
-
-    const place = (el) => {
-      const ratio = parseFloat(el.dataset.ratio) || 0.75;
-      const slotSpan = (cols >= 2 && ratio >= 1.25) ? 2 : 1;
-      const w = colW * slotSpan + GAP * (slotSpan - 1);
-      const h = Math.round(w / ratio);
-      const slot = findSlot(h, ratio);
-      const x = slot.col * (colW + GAP);
-      el.style.width = w + 'px';
-      el.style.height = h + 'px';
-      el.style.transform = 'translate(' + x + 'px, ' + slot.y + 'px)';
-      el.classList.add('placed');
-      for (let i = slot.col; i < slot.col + slot.span && i < cols; i++) heights[i] = slot.y + h + GAP;
-      placedOrder.push(el);
-      gallery.style.height = (Math.max(...heights) - GAP) + 'px';
-      if (loadedCount) loadedCount.textContent = placedOrder.length;
-    };
-
-    // 图片加载 → 按完成顺序落位；WebP 失败自动回退 JPG；都失败显示占位
-    const loadOne = (el) => {
-      if (el.dataset.done) return;
-      el.dataset.done = '1';
-      const img = el.querySelector('img');
-      let tried = 0;
-      const attempt = (src) => {
-        const real = new Image();
-        real.onload = () => {
-          img.src = real.src;
-          img.classList.add('loaded');
-          place(el);
-          const idx = items.indexOf(el);
-          if (skeletons[idx]) { skeletons[idx].remove(); skeletons[idx] = null; }
-        };
-        real.onerror = () => {
-          if (tried === 0 && img.dataset.fallback) { tried = 1; attempt(img.dataset.fallback); return; }
-          el.classList.add('failed');
-          place(el);
-        };
-        real.src = src;
-        if (real.complete && real.naturalWidth) real.onload();
-      };
-      attempt(img.dataset.src || img.src);
-    };
-
-    metrics();
-    // ── 骨架屏：按"预测布局"先把整页占位，页面高度立即稳定（不跳动）──
-    const skeletons = [];
-    const drawSkeletons = () => {
-      skeletons.forEach(s => { if (s) s.remove(); });
-      skeletons.length = 0;
+    // 按 DOM 顺序一次排完：短列优先；横构图尝试跨双列（跨列会留长条空隙时退回单列）
+    const layout = () => {
       metrics();
       const hh = new Array(cols).fill(0);
       items.forEach(el => {
         const ratio = parseFloat(el.dataset.ratio) || 0.75;
-        const span = (cols >= 2 && ratio >= 1.25) ? 2 : 1;
-        const w = colW * span + GAP * (span - 1);
-        const h = Math.round(w / ratio);
+        let span = (cols >= 2 && ratio >= 1.25) ? 2 : 1;
         let col = 0, y = Infinity;
         if (span === 2) {
-          for (let c = 0; c + 1 < cols; c++) { const yy = Math.max(hh[c], hh[c + 1]); if (yy < y) { y = yy; col = c; } }
+          for (let c = 0; c + 1 < cols; c++) {
+            const yy = Math.max(hh[c], hh[c + 1]);
+            if (yy < y) { y = yy; col = c; }
+          }
           const single = Math.min(...hh);
-          if (y - single > 140) { col = hh.indexOf(single); y = single; }
-        } else { y = Math.min(...hh); col = hh.indexOf(y); }
-        if (!el.classList.contains('placed')) {
-          const d = document.createElement('div');
-          d.className = 'skeleton';
-          d.style.width = w + 'px';
-          d.style.height = h + 'px';
-          d.style.transform = 'translate(' + (col * (colW + GAP)) + 'px, ' + y + 'px)';
-          gallery.appendChild(d);
-          skeletons.push(d);
+          if (y - single > 140) { span = 1; }   // 退回单列，避免跨列下方留长条空隙
         }
-        for (let i = col; i < col + Math.min(span, cols - col); i++) hh[i] = y + h + GAP;
+        if (span === 1) {
+          y = Math.min(...hh);
+          col = hh.indexOf(y);
+        }
+        const w = colW * span + GAP * (span - 1);
+        const h = Math.round(w / ratio);
+        el.style.width = w + 'px';
+        el.style.height = h + 'px';
+        el.style.transform = 'translate(' + (col * (colW + GAP)) + 'px, ' + y + 'px)';
+        el.classList.add('placed');
+        for (let i = col; i < col + span && i < cols; i++) hh[i] = y + h + GAP;
       });
-      if (placedOrder.length === 0) gallery.style.height = (Math.max(...hh) - GAP) + 'px';
+      const total = hh.length ? Math.max(...hh) : 0;
+      gallery.style.height = Math.max(0, total - GAP) + 'px';
     };
-    drawSkeletons();
-    // 调试钩子（控制台可用：__masonry.drawSkeletons()）
-    window.__masonry = { drawSkeletons, skeletons, items, gallery };
+
+    // 图片加载：懒加载 + WebP 失败回退 JPG；只负责显示，不再改变落位（避免布局抖动）
+    let loadedN = 0;
+    const loadOne = (el) => {
+      if (el.dataset.done) return;
+      el.dataset.done = '1';
+      const img = el.querySelector('img');
+      let tried = 0, counted = false;
+      const done = () => {
+        img.classList.add('loaded');
+        if (!counted) { counted = true; loadedN++; if (loadedCount) loadedCount.textContent = loadedN; }
+      };
+      const attempt = (src) => {
+        const real = new Image();
+        real.onload = () => { img.src = real.src; done(); };
+        real.onerror = () => {
+          if (tried === 0 && img.dataset.fallback) { tried = 1; attempt(img.dataset.fallback); return; }
+          el.classList.add('failed');
+        };
+        real.src = src;
+        if (real.complete && real.naturalWidth) { img.src = real.src; done(); }
+      };
+      attempt(img.dataset.src || img.src);
+    };
+
+    layout();
 
     if ('IntersectionObserver' in window) {
       const io = new IntersectionObserver((entries) => {
@@ -912,18 +866,17 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       items.forEach(loadOne);
     }
 
-    // 窗口尺寸变化 → 重新预测骨架 + 按原落位顺序重新排布
+    // 尺寸变化 → 用同一套算法重排（结果可预期）
     let rt = null;
     window.addEventListener('resize', () => {
       clearTimeout(rt);
-      rt = setTimeout(() => {
-        metrics();
-        const order = placedOrder.slice();
-        placedOrder.length = 0;
-        order.forEach(el => place(el));
-        drawSkeletons();
-      }, 160);
+      rt = setTimeout(layout, 140);
     });
+    // 首屏 clientWidth 可能取到 0（字体/滚动条就绪前）→ 加载完再校一次
+    window.addEventListener('load', () => setTimeout(layout, 60));
+
+    // 调试钩子（控制台可用：__masonry.layout()）
+    window.__masonry = { layout, items, gallery };
   }
 
   // 详情页：PhotoSwipe 画廊（成熟组件：缩放/滑动切换/键盘/缩略图索引）
