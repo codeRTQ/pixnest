@@ -1,0 +1,28 @@
+# 内容与构建产物（体积大、涉及版权，不入库）
+sets/
+dist/
+deploy/
+_trash/
+_test_upload/
+
+# 本地后台日志与临时文件
+_admin.log
+_admin.err.log
+*.log
+browser-screenshots/
+
+# 工具缓存（含 wrangler 账号信息）
+.wrangler/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
