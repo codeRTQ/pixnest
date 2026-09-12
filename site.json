@@ -5,6 +5,12 @@
   "setsPerPage": 12,
   "previewCount": 8,
   "icp": "",
+  "openlist": {
+    "base": "http://172.30.12.210:5244",
+    "label": "OpenList",
+    "dirTemplate": "/天翼云盘(crypt) /{model}/{model} {title}",
+    "fileTemplate": "{n5}.jpg"
+  },
   "adultGate": true,
   "disclaimer": "本站内容均为网络收集整理，仅供个人学习与欣赏，请勿用于商业用途。如内容侵犯您的权益，请联系管理员删除。",
   "dmca": "",

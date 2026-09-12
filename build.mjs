@@ -38,6 +38,13 @@ const defaultConfig = {
   disclaimer: '本站内容均为网络收集整理，仅供个人学习与欣赏，请勿用于商业用途。如内容侵犯您的权益，请联系管理员删除。',
   dmca: '',                  // 版权投诉联系方式（邮箱/表单链接），留空则用默认文案
   privacy: '',               // 隐私政策正文（留空则不生成隐私页）
+  // 原图托管（OpenList / AList 网盘）：配好后每套图自动生成「打开原图目录」与每张图的「原图」链接
+  //   base         OpenList 访问地址（局域网地址公网访客打不开，需配合 Cloudflare Tunnel 等对外暴露）
+  //   dirTemplate  图集目录模板，可用 {model} {title} {slug} {date} {series}
+  //   fileTemplate 原图文件名模板，{n} 为序号（{n5} = 补零到 5 位，如 00001.jpg）
+  //   rawPrefix   单张原图的接口前缀（默认 /p；/d 通常要求登录会返回 403）
+  //   单套图可用 meta.json 的 openlistDir 覆盖目录
+  openlist: null,
 }
 const config = existsSync(join(ROOT, 'site.json'))
   ? { ...defaultConfig, ...JSON.parse(readFileSync(join(ROOT, 'site.json'), 'utf8')) }
@@ -145,6 +152,42 @@ function listImages(dir) {
 }
 
 /** 读取单个图集目录 → 归一化对象 */
+// ─────────────────── 原图托管（OpenList / AList）链接生成 ───────────────────
+// 站点只放缩略图，原图仍留在自己的网盘里；这里按模板拼出「整套目录」与「单张原图」的地址。
+const OL = (config.openlist && config.openlist.base) ? config.openlist : null
+/** 逐段 URL 编码（保留 / 分隔；空格、( )、[] 等交给 encodeURIComponent） */
+const encPath = (p) => String(p).replace(/^\/+|\/+$/g, '').split('/').map(encodeURIComponent).join('/')
+/** 从本地文件名里取出序号：01.jpg → 1；无法解析返回 null */
+function fileIndex(name) {
+  const m = String(name).match(/^0*(\d+)/)
+  return m ? Number(m[1]) : null
+}
+/** 第 idx 张原图在网盘里的文件名（默认补零到 5 位：00001.jpg） */
+function olFileName(idx) {
+  const tpl = (OL && OL.fileTemplate) || '{n5}.jpg'
+  return tpl.replace(/\{n(\d)?\}/g, (m, w) => String(idx).padStart(w ? Number(w) : 1, '0'))
+}
+/** 图集在网盘里的目录：优先 meta.json 的 openlistDir，否则按 dirTemplate 拼 */
+function olDirOf(s) {
+  if (!OL) return ''
+  if (s.openlistDir) return s.openlistDir
+  const tpl = OL.dirTemplate || ''
+  if (!tpl) return ''
+  return tpl.replace(/\{(\w+)\}/g, (m, k) => (s[k] != null && s[k] !== '' ? String(s[k]) : m))
+}
+/** 图集目录的完整 URL（已编码）——用于「打开原图目录」，进的是 OpenList 前端界面 */
+function olDirUrl(s) {
+  const d = olDirOf(s)
+  return d ? String(OL.base).replace(/\/+$/, '') + '/' + encPath(d) : ''
+}
+/** 单张原图的直链——走 OpenList 的原始文件接口（默认 /p，/d 通常需要登录会 403） */
+function olFileUrl(s, fileName) {
+  const d = olDirOf(s)
+  if (!d) return ''
+  const pre = String(OL.rawPrefix == null ? '/p' : OL.rawPrefix).replace(/\/+$/, '')
+  return String(OL.base).replace(/\/+$/, '') + pre + '/' + encPath(d + '/' + fileName)
+}
+
 function readSet(slug) {
   const dir = join(SETS_DIR, slug)
   const metaPath = join(dir, 'meta.json')
@@ -179,7 +222,7 @@ function readSet(slug) {
     `[${meta.imageCount || images.length}P${hasPack || meta.packSize ? `／${meta.packSize || fmtSize(statSync(packPath).size)}` : ''}]`,
   ].join('')
 
-  return {
+  const out = {
     slug,
     dir,
     title: rawTitle,
@@ -206,9 +249,17 @@ function readSet(slug) {
     lqip,
     modelInfo: meta.modelInfo || '',
     profile: meta.profile || null,
+    openlistDir: meta.openlistDir || '',
     sizes: Object.fromEntries(images.map(f => [f, imageSize(join(dir, 'images', f))])),
     previews: images.slice(0, meta.previewCount || config.previewCount),
   }
+  // 没有本地压缩包、也没手填外链时，用 OpenList 目录兜底当下载入口
+  out.olDir = olDirUrl(out)
+  if (out.olDir) {
+    if (!out.netdisk) out.netdisk = (OL.label || 'OpenList')
+    if (!out.downloadUrl) out.downloadUrl = out.olDir
+  }
+  return out
 }
 
 // ─────────────────────────── 相关推荐 / 分类页 ───────────────────────────
@@ -374,17 +425,20 @@ function detailPage(s, prev, next, canonical = '', related = []) {
   const downloadBlock = `
   <section class="download">
     <div class="dl-main">
-      ${s.downloadUrl && !s.hasPack
-        ? `<a class="btn btn-primary" href="${esc(s.downloadUrl)}" target="_blank" rel="noopener">⬇ 图集下载 Download${s.netdisk ? `（${esc(s.netdisk)}）` : ''}</a>`
-        : (s.hasPack && !LITE
-          ? `<a class="btn btn-primary" href="${rel}set/${s.slug}/pack.zip" download>⬇ 下载图集压缩包（${esc(s.packSize)}）</a>`
-          : (s.hasPack && LITE
-            ? `<span class="btn btn-disabled">压缩包未随站点部署（请用网盘链接）</span>`
-            : `<span class="btn btn-disabled">暂无下载</span>`))}
+      ${s.olDir
+        ? `<a class="btn btn-primary" href="${esc(s.olDir)}" target="_blank" rel="noopener">⬇ 打开原图目录（${esc(s.netdisk || 'OpenList')}）</a>`
+        : (s.downloadUrl && !s.hasPack
+          ? `<a class="btn btn-primary" href="${esc(s.downloadUrl)}" target="_blank" rel="noopener">⬇ 图集下载 Download${s.netdisk ? `（${esc(s.netdisk)}）` : ''}</a>`
+          : (s.hasPack && !LITE
+            ? `<a class="btn btn-primary" href="${rel}set/${s.slug}/pack.zip" download>⬇ 下载图集压缩包（${esc(s.packSize)}）</a>`
+            : (s.hasPack && LITE
+              ? `<span class="btn btn-disabled">压缩包未随站点部署（请用网盘链接）</span>`
+              : `<span class="btn btn-disabled">暂无下载</span>`)))}
+      ${s.olDir && s.password ? `<span class="dl-hint">目录密码：<code>${esc(s.password)}</code></span>` : ''}
     </div>
     <dl class="dl-info">
       ${s.password ? `<div><dt>解压密码</dt><dd><code>${esc(s.password)}</code></dd></div>` : ''}
-      ${s.netdisk ? `<div><dt>下载网盘</dt><dd>${esc(s.netdisk)}</dd></div>` : ''}
+      ${s.netdisk ? `<div><dt>原图存放</dt><dd>${esc(s.netdisk)}</dd></div>` : ''}
       ${s.resolution ? `<div><dt>图片像素</dt><dd>${esc(s.resolution)}</dd></div>` : ''}
       <div><dt>图片数量</dt><dd>${s.imageCount} 张</dd></div>
       ${s.packSize ? `<div><dt>压缩包大小</dt><dd>${esc(s.packSize)}</dd></div>` : ''}
@@ -405,6 +459,9 @@ function detailPage(s, prev, next, canonical = '', related = []) {
           : `${rel}set/${s.slug}/images/${f}`
         const bigW = LITE ? Math.min(size.w, 1080) : size.w
         const bigH = LITE ? Math.round(bigW / (size.w / size.h)) : size.h
+        // 原图直链：本地 01.jpg ↔ 网盘 00001.jpg（按序号映射）
+        const fi = fileIndex(f)
+        const olUrl = (s.olDir && fi) ? olFileUrl(s, olFileName(fi)) : ''
         return `<figure class="preview" data-ratio="${(size.w / size.h).toFixed(4)}">
         <a class="preview-link" href="${bigSrc}"
            data-pswp-width="${bigW}" data-pswp-height="${bigH}"
@@ -415,12 +472,13 @@ function detailPage(s, prev, next, canonical = '', related = []) {
                ${useWebp ? `data-fallback="${rel}set/${s.slug}/${thumb}"` : ''}
                alt="${esc(s.title)} 预览图 ${i + 1}" decoding="async">
         </a>
+        ${olUrl ? `<a class="orig-link" href="${esc(olUrl)}" target="_blank" rel="noopener" title="在${esc(s.netdisk || 'OpenList')}打开原图（${size.w}×${size.h}）">原图 ↗</a>` : ''}
         <figcaption>${i + 1} / ${s.imageCount}</figcaption>
       </figure>`
       }).join('')}
     </div>
-    <p class="stream-hint" id="streamHint">已加载 <span id="loadedCount">0</span> / ${s.previews.length} 张预览 · 滚动时自动加载 · <b>点击图片打开画廊</b></p>
-    ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张，以上为部分预览 · 完整图集请下载压缩包</p>` : ''}`
+    <p class="stream-hint" id="streamHint">已加载 <span id="loadedCount">0</span> / ${s.previews.length} 张预览 · 滚动时自动加载 · <b>点击图片打开画廊</b>${s.olDir ? ` · 右上角「原图 ↗」直达原图` : ''}</p>
+    ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张，以上为部分预览 · ${s.olDir ? `完整原图请到 <a href="${esc(s.olDir)}" target="_blank" rel="noopener">${esc(s.netdisk || 'OpenList')}</a> 查看` : '完整图集请下载压缩包'}</p>` : ''}`
     : '<p class="empty">暂无预览图</p>'
 
   const body = `
@@ -575,6 +633,11 @@ img{max-width:100%;display:block}
 .preview-link{display:block;width:100%;height:100%;position:relative}
 .preview-link::after{content:'点击看原图';position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:2px 8px;border-radius:999px;opacity:0;transition:opacity .2s}
 .preview:hover .preview-link::after{opacity:1}
+/* 原图直链（OpenList）：右上角小胶囊 */
+.orig-link{position:absolute;top:8px;right:8px;z-index:2;background:rgba(0,0,0,.62);color:#fff;font-size:12px;line-height:1;padding:6px 10px;border-radius:999px;text-decoration:none;opacity:.9;transition:opacity .2s,background .2s;backdrop-filter:blur(4px)}
+.orig-link:hover{opacity:1;background:var(--accent);color:#fff}
+.dl-hint{color:var(--dim);font-size:13px}
+.dl-hint code{background:var(--panel2);padding:2px 6px;border-radius:6px}
 .stream-hint{color:var(--dim);text-align:center;font-size:13px;margin:14px 0}
 .tag-link{text-decoration:none;transition:.15s}
 .tag-link:hover{color:var(--accent);border-color:var(--accent);background:rgba(91,140,255,.12)}
@@ -1129,6 +1192,11 @@ function build() {
     + `\n</channel></rss>\n`)
 
   console.log(`✓ 构建完成：${sets.length} 套图集 · ${totalPages} 个列表页 → dist/`)
+  // 原图托管地址是内网 IP 时提醒：公网访客打不开这些链接
+  if (OL && /^https?:\/\/(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(String(OL.base))) {
+    console.warn(`! OpenList 地址是内网地址（${OL.base}）→ 公网访客点「原图」「打开原图目录」会打不开`)
+    console.warn('  对外可用需先用 Cloudflare Tunnel / 端口映射暴露，再把 site.json 的 openlist.base 换成公网域名')
+  }
   sets.slice(0, 5).forEach(s => console.log(`   · ${s.displayTitle}（${s.imageCount}P${s.packSize ? ' / ' + s.packSize : ''}）`))
   if (sets.length > 5) console.log(`   … 另有 ${sets.length - 5} 套`)
 }
