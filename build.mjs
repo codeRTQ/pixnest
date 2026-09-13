@@ -33,6 +33,7 @@ const defaultConfig = {
   setsPerPage: 12,
   previewCount: 8,
   relatedCount: 4,           // 详情页「相关推荐」条数（4 条正好一行）
+  modelSideCount: 5,         // 详情页侧栏「模特的其他作品」条数
   assetSalt: '2',            // CSS/JS 版本盐：assets 是 immutable 长缓存，改了样式若边缘缓存不刷新，把它 +1 即可强制换 URL
   icp: '',
   // 合规相关（部署前请按当地法律与平台要求配置）
@@ -458,7 +459,7 @@ function listPage(sets, page, totalPages, rel = '', total = sets.length) {
   })
 }
 
-function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}, fillSet = null) {
+function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}, fillSet = null, moreSets = [], modelTotal = 0) {
   const rel = '../../'
   // 模特资料：仅展示填写过的字段（AI 不会生成这些）
   const pf = s.profile || {}
@@ -576,10 +577,22 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
     ${(s.model || s.series) ? `<section class="side-box">
       <h3 class="side-title">👤 模特与系列</h3>
       <div class="side-links">
-        ${s.model ? `<a class="side-link" href="${rel}index.html?q=${encodeURIComponent(s.model)}">${esc(s.model)} <span class="dim">的全部作品</span></a>` : ''}
+        ${s.model ? `<a class="side-link" href="${rel}index.html?q=${encodeURIComponent(s.model)}">${esc(s.model)} <span class="dim">的全部作品${modelTotal > 1 ? `（${modelTotal} 套）` : ''}</span></a>` : ''}
         ${s.series ? `<a class="side-link" href="${rel}series/${encodeURIComponent(s.series)}.html">${esc(s.series)} <span class="dim">系列全部</span></a>` : ''}
-        ${s.model ? `<a class="side-link" href="${rel}collections.html#tags"><span class="dim">按标签浏览 →</span></a>` : ''}
       </div>
+      ${moreSets.length ? `<div class="side-sets">
+        <p class="side-sub">${esc(s.model || s.series)} 的其他作品</p>
+        ${moreSets.map(x => `<a class="side-set" href="${rel}set/${x.slug}/index.html" title="${esc(x.title)}">
+          <span class="ss-cover">${x.coverFile
+            ? `<img loading="lazy" src="${rel}set/${x.slug}/${x.coverThumb ? 'thumbs/' + x.coverThumb + verQ(x.thumbVer[x.coverThumb]) : x.coverFile}" alt="${esc(x.title)}">`
+            : ''}</span>
+          <span class="ss-body">
+            <b>${esc(x.title)}</b>
+            <span class="ss-meta">${esc(x.date)} · ${x.imageCount}P${x.packSize ? ' · ' + esc(x.packSize) : ''}</span>
+          </span>
+        </a>`).join('')}
+        ${modelTotal > moreSets.length + 1 ? `<a class="side-more" href="${rel}index.html?q=${encodeURIComponent(s.model || '')}">查看全部 ${modelTotal} 套 →</a>` : ''}
+      </div>` : ''}
     </section>` : ''}
     <section class="side-box">
       <h3 class="side-title">📋 本套信息</h3>
@@ -795,9 +808,23 @@ img{max-width:100%;display:block}
 .detail-side::-webkit-scrollbar{width:6px}
 .detail-side::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
 .detail-side::-webkit-scrollbar-track{background:transparent}
+.detail-side.side-tall{position:static;max-height:none;overflow:visible}
 .side-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
 .side-title{margin:0 0 10px;font-size:14px;font-weight:600;color:var(--accent2)}
 .side-dl-wrap{margin:0 0 8px}
+/* 侧栏：模特的其他作品（缩略图 + 标题 + 日期/张数） */
+.side-sub{margin:12px 0 8px;font-size:12px;color:var(--dim);border-top:1px solid var(--line);padding-top:10px}
+.side-sets{display:flex;flex-direction:column;gap:4px}
+.side-set{display:flex;gap:9px;align-items:center;padding:5px 6px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
+.side-set:hover{background:var(--panel2)}
+.ss-cover{flex:0 0 52px;width:52px;height:69px;border-radius:7px;overflow:hidden;background:var(--panel2)}
+.ss-cover img{width:100%;height:100%;object-fit:cover;display:block}
+.ss-body{min-width:0;display:flex;flex-direction:column;gap:3px}
+.ss-body b{font-size:13px;line-height:1.4;font-weight:600;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ss-meta{font-size:11.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.side-more{display:block;margin-top:8px;font-size:12.5px;color:var(--accent);text-decoration:none}
+.side-more:hover{text-decoration:underline}
 .side-box .btn{width:100%;justify-content:center;display:flex}
 .side-note{margin:8px 0 0;font-size:12px;line-height:1.7;color:var(--dim)}
 .side-note code{background:var(--panel2);padding:1px 6px;border-radius:5px;color:var(--fg)}
@@ -1167,6 +1194,15 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     window.__masonry = { layout, items, gallery };
   }
 
+  // 详情页侧栏：内容比屏幕高时不再吸顶（避免嵌套滚动条），跟着页面一起滚
+  const sideEl = document.querySelector('.detail-side');
+  if (sideEl) {
+    const fitSide = () => sideEl.classList.toggle('side-tall', sideEl.scrollHeight > window.innerHeight - 120);
+    fitSide();
+    window.addEventListener('resize', fitSide);
+    window.addEventListener('load', () => setTimeout(fitSide, 80));
+  }
+
   // 详情页：PhotoSwipe 画廊（成熟组件：缩放/滑动切换/键盘/缩略图索引）
   if (document.getElementById('gallery')) {
     const base = (location.pathname.includes('/set/') ? '../../' : '');
@@ -1257,7 +1293,14 @@ function build() {
     const fillSet = fillPool.find(x => s.series && x.series === s.series)
       || fillPool.find(x => s.model && x.model === s.model)
       || fillPool[0] || null
-    writeFileSync(join(outDir, 'index.html'), detailPage(s, sets[i - 1], sets[i + 1], pageUrl(`set/${encodeURIComponent(s.slug)}/`), related, byTag, fillSet))
+    // 模特的其他作品（侧栏推荐）：同系列优先，再按日期倒序，取 5 套
+    const sameModel = s.model ? sets.filter(x => x.model === s.model && x.slug !== s.slug) : []
+    const moreSets = sameModel.slice().sort((a, b) => {
+      const sa = (s.series && a.series === s.series) ? 0 : 1
+      const sb = (s.series && b.series === s.series) ? 0 : 1
+      return sa - sb || String(b.date || '').localeCompare(String(a.date || ''))
+    }).slice(0, config.modelSideCount || 5)
+    writeFileSync(join(outDir, 'index.html'), detailPage(s, sets[i - 1], sets[i + 1], pageUrl(`set/${encodeURIComponent(s.slug)}/`), related, byTag, fillSet, moreSets, sameModel.length + 1))
 
     // 预览图（原图；精简模式下不复制，改用缩略图作为大图）
     const imgOut = join(outDir, 'images')
