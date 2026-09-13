@@ -140,14 +140,20 @@ def check():
         print(f'  {"✅" if ok else "❌"} {need}')
 
 
-def bundle():
+def bundle(make_tar=True):
     print('\n=== 3/4 打包与配置 ===')
     os.makedirs(OUT, exist_ok=True)
-    # tar.gz
+    # tar.gz：只有 OSS/scp/Docker 这类"要整包搬走"的场景才需要；
+    # Cloudflare Pages 是直传 dist，打一个几百 MB 的包纯属浪费磁盘与时间
     tar_path = os.path.join(OUT, 'dist.tar.gz')
-    with tarfile.open(tar_path, 'w:gz') as t:
-        t.add(DIST, arcname='.')
-    print(f'  ✅ {tar_path}（{os.path.getsize(tar_path)/1048576:.1f} MB）')
+    if make_tar:
+        with tarfile.open(tar_path, 'w:gz') as t:
+            t.add(DIST, arcname='.')
+        print(f'  ✅ {tar_path}（{os.path.getsize(tar_path)/1048576:.1f} MB）')
+    else:
+        if os.path.exists(tar_path):
+            os.remove(tar_path)          # 清掉历史遗留的大包
+        print('  ⏭ 跳过 dist.tar.gz（直传部署不需要；需要时用 --bundle）')
 
     # nginx 配置
     nginx = f"""# {SITE_NAME} · Nginx 站点配置
@@ -377,6 +383,7 @@ def main():
     ap.add_argument('--full', action='store_true', help='完整模式：把原图与压缩包也打进站点（体积大 10-20 倍）')
     ap.add_argument('--base-url', metavar='URL', help='站点绝对地址，如 https://img.example.com（写入 sitemap/canonical/og）')
     ap.add_argument('--with-admin', action='store_true', help='保留本地后台入口（默认公网模式会剥离 ?admin=1 与 8091 链接）')
+    ap.add_argument('--bundle', action='store_true', help='额外打包 deploy/dist.tar.gz（默认直传部署不打，太大）')
     ap.add_argument('--project', default='img-site', help='Cloudflare Pages 项目名（默认 img-site）')
     ap.add_argument('--branch', default='main', help='Cloudflare Pages 分支名（默认 main）')
     a = ap.parse_args()
@@ -387,7 +394,7 @@ def main():
     check()
     if a.check:
         return
-    bundle()
+    bundle(make_tar=(a.bundle or a.oss or a.sftp or not (a.cloudflare or a.oss or a.sftp)))
     if a.oss:
         oss_upload()
     elif a.cloudflare:
