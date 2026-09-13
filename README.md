@@ -24,7 +24,9 @@
 
 **后台（仅本机运行）**
 - 多图上传（拖拽、XHR 进度、MD5 去重）、发布后随时编辑
-- 自动生成缩略图（1080px + LQIP + WebP）、封面（600×800）
+- 自动生成缩略图（**1920px** + LQIP + WebP，清晰度优先）、封面（800×1067）
+- 缩略图 URL 自动带版本戳（`?v=体积-时间`）→ 换图或重新生成后立刻生效，不会被浏览器/CDN 旧缓存挡住
+- `rethumb.py`：改了缩略图规格后一条命令重生成全部图集（`python rethumb.py`）
 - **拖拽排序**、**封面裁剪选择器**、自动识别原图分辨率
 - AI 自动打标签（OpenAI 兼容接口）+ 人工增删调整 + **标签同义词去重合并**
 - 批量操作：改系列、统一加标签、批量自动打标签、批量删除、批量探测分辨率
@@ -60,7 +62,7 @@ sets/<slug>/
 ├── meta.json     # 元数据（标题/系列/日期/模特/标签/网盘…）
 ├── cover.jpg     # 封面（后台自动生成 600×800）
 ├── images/       # 原图
-├── thumbs/       # 缩略图 1080px + .lqip.jpg + .webp（后台自动生成）
+├── thumbs/       # 缩略图 1920px(.webp 主 + .jpg 回退) + .lqip.jpg（后台自动生成）
 └── pack.zip      # 可选：压缩包（完整模式才会进 dist）
 ```
 
@@ -129,7 +131,8 @@ SSH 隧道 / Cloudflare Tunnel / Tailscale，不要开放公网端口。
    `/set/*/thumbs/*` 这类双 splat 会整条失效，路径中段要用 `:slug` 占位符。
    `/*.html` 也不生效 —— Pages 对 HTML 的默认 `max-age=0, must-revalidate` 已是最优。
 3. **缓存策略**：`assets/*` 带 `?v=` 内容指纹 → 长缓存 immutable；
-   缩略图 1 天 + `stale-while-revalidate`（后台改图后不至于长期看到旧图）。
+   缩略图 URL 带 `?v=` 版本戳，改图后自动更新；`_headers` 对缩略图给 1 天 +
+   `stale-while-revalidate`（版本戳保证更新即时可见，缓存又不会被浪费）。
 4. **Windows 控制台是 GBK**：Python 脚本已 `sys.stdout.reconfigure(encoding='utf-8')`，
    子进程调用也显式传 `encoding='utf-8'`，否则中文报 `UnicodeEncodeError`。
 5. **`preview.ps1` 必须存为 UTF-8 with BOM**，否则 Windows PowerShell 5.1 会因中文注释解析失败。

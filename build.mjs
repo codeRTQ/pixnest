@@ -102,6 +102,15 @@ const fmtSize = (bytes) => {
 }
 const IMG_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'])
 
+/** 文件版本戳（体积 + 修改时间）→ 拼进图片 URL，换了图立刻生效，不会被浏览器/CDN 旧缓存挡住 */
+function fileVer(p) {
+  try {
+    const st = statSync(p)
+    return st.size.toString(36) + '-' + Math.floor(st.mtimeMs / 1000).toString(36)
+  } catch { return '' }
+}
+const verQ = (v) => (v ? '?v=' + v : '')
+
 /** 读取图片文件头取宽高（零依赖，只读前 64KB） */
 function imageSize(path) {
   try {
@@ -202,15 +211,20 @@ function readSet(slug) {
   const thumbAll = listImages(join(dir, 'thumbs')).filter(f => !f.endsWith('.lqip.jpg'))
   const thumbSet = new Set(thumbAll)
   const hasThumbs = thumbAll.length > 0
-  // 每张原图用哪个缩略图文件：优先 .webp（体积约为 jpg 的一半），没有才退回 .jpg
-  const thumbFor = {}
+  // 每张原图用哪个缩略图文件：优先 .webp（体积约为 jpg 的一半），jpg 作为老浏览器回退
+  const thumbFor = {}, thumbAlt = {}
   for (const f of images) {
     const webp = f.replace(/\.[^.]+$/, '.webp')
-    if (thumbSet.has(webp)) thumbFor[f] = webp
-    else if (thumbSet.has(f)) thumbFor[f] = f
+    if (thumbSet.has(webp)) {
+      thumbFor[f] = webp
+      if (thumbSet.has(f)) thumbAlt[f] = f
+    } else if (thumbSet.has(f)) thumbFor[f] = f
   }
   const thumbs = Object.values(thumbFor)
   const coverThumb = ['cover.webp', 'cover.jpg', 'cover.jpeg', 'cover.png'].find(f => existsSync(join(dir, 'thumbs', f)))
+  // 缩略图版本戳：文件变了 URL 就变，避免读到旧缓存
+  const thumbVer = {}
+  for (const f of [...thumbs, coverThumb].filter(Boolean)) thumbVer[f] = fileVer(join(dir, 'thumbs', f))
   const lqip = {}
   for (const f of images) {
     const p = join(dir, 'thumbs', f.replace(/\.[^.]+$/, '.lqip.jpg'))
@@ -253,6 +267,8 @@ function readSet(slug) {
     images,
     thumbs,
     thumbFor,
+    thumbAlt,
+    thumbVer,
     hasThumbs,
     lqip,
     modelInfo: meta.modelInfo || '',
@@ -374,7 +390,7 @@ const card = (s, rel = '') => `
   <a class="card-link" href="${rel}set/${s.slug}/index.html">
     <div class="card-cover">
       ${s.coverFile
-        ? `<img loading="lazy" src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb : s.coverFile}" alt="${esc(s.title)}">`
+        ? `<img loading="lazy" src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="${esc(s.title)}">`
         : `<div class="no-cover">无封面</div>`}
       <span class="badge">${s.imageCount}P</span>
       ${s.packSize ? `<span class="badge badge-size">${esc(s.packSize)}</span>` : ''}
@@ -457,27 +473,28 @@ function detailPage(s, prev, next, canonical = '', related = []) {
   const previews = s.previews.length
     ? `<div class="previews" id="gallery">
       ${s.previews.map((f, i) => {
-        // 缩略图文件：优先 webp（体积约为 jpg 一半），没有才用 jpg；构建时只会部署这一个
+        // 缩略图文件：优先 webp（体积约为 jpg 一半），jpg 作为老浏览器回退
         const tf = s.thumbFor[f] || f
+        const alt = (s.thumbAlt && s.thumbAlt[f]) || ''
         const thumb = s.hasThumbs ? `thumbs/${tf}` : `images/${f}`
         const ph = s.lqip[f] ? `src="${s.lqip[f]}"` : ''
         const size = s.sizes[f] || { w: 1200, h: 1600 }
-        // 精简模式：原图未随站点部署，画廊大图用缩略图，并标注像素
-        const bigSrc = LITE
-          ? `${rel}set/${s.slug}/${thumb}`
-          : `${rel}set/${s.slug}/images/${f}`
-        const bigW = LITE ? Math.min(size.w, 1080) : size.w
-        const bigH = LITE ? Math.round(bigW / (size.w / size.h)) : size.h
+        // 精简模式：原图未随站点部署，画廊大图用缩略图 → 取缩略图真实像素（改 PREVIEW_W 后自动跟随）
+        const tsz = s.hasThumbs ? imageSize(join(s.dir, 'thumbs', tf)) : null
+        const bigW = LITE ? (tsz ? tsz.w : Math.min(size.w, 1920)) : size.w
+        const bigH = LITE ? (tsz ? tsz.h : Math.round(bigW / (size.w / size.h))) : size.h
         // 原图直链：本地 01.jpg ↔ 网盘 00001.jpg（按序号映射）
         const fi = fileIndex(f)
         const olUrl = (s.olDir && fi) ? olFileUrl(s, olFileName(fi)) : ''
+        const bigSrc = LITE ? `${rel}set/${s.slug}/${thumb}${verQ(s.thumbVer[tf])}` : `${rel}set/${s.slug}/images/${f}`
         return `<figure class="preview" data-ratio="${(size.w / size.h).toFixed(4)}">
         <a class="preview-link" href="${bigSrc}"
            data-pswp-width="${bigW}" data-pswp-height="${bigH}"
-           data-pswp-srcset="${rel}set/${s.slug}/${thumb} 1080w"
+           data-pswp-srcset="${rel}set/${s.slug}/${thumb}${verQ(s.thumbVer[tf])} ${bigW}w"
            data-orig-w="${size.w}" data-orig-h="${size.h}"
            target="_blank" rel="noopener">
-          <img class="ph" ${ph} data-src="${rel}set/${s.slug}/${thumb}"
+          <img class="ph" ${ph} data-src="${rel}set/${s.slug}/${thumb}${verQ(s.thumbVer[tf])}"
+               ${alt ? `data-fallback="${rel}set/${s.slug}/thumbs/${alt}${verQ(s.thumbVer[alt])}"` : ''}
                alt="${esc(s.title)} 预览图 ${i + 1}" decoding="async">
         </a>
         ${olUrl ? `<a class="orig-link" href="${esc(olUrl)}" target="_blank" rel="noopener" title="在${esc(s.netdisk || 'OpenList')}打开原图（${size.w}×${size.h}）">原图 ↗</a>` : ''}
@@ -523,7 +540,7 @@ function detailPage(s, prev, next, canonical = '', related = []) {
     og: {
       type: 'article',
       url: canonical,
-      image: s.coverFile ? pageUrl(`set/${encodeURIComponent(s.slug)}/${s.coverThumb ? 'thumbs/' + s.coverThumb : s.coverFile}`) : '',
+      image: s.coverFile ? pageUrl(`set/${encodeURIComponent(s.slug)}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}`) : '',
     },
     jsonld: JSON.stringify({
       '@context': 'https://schema.org',
@@ -531,7 +548,7 @@ function detailPage(s, prev, next, canonical = '', related = []) {
       name: s.title,
       description: s.description || undefined,
       datePublished: s.date,
-      image: s.coverFile ? pageUrl(`set/${encodeURIComponent(s.slug)}/${s.coverThumb ? 'thumbs/' + s.coverThumb : s.coverFile}`) : undefined,
+      image: s.coverFile ? pageUrl(`set/${encodeURIComponent(s.slug)}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}`) : undefined,
       numberOfItems: s.imageCount,
       keywords: s.tags.join(','),
       author: s.model ? { '@type': 'Person', name: s.model } : undefined,
@@ -1036,14 +1053,11 @@ function build() {
     // 压缩包（精简模式下不复制，依赖网盘外链）
     if (s.hasPack && !LITE) copyFileSync(s.packPath, join(outDir, 'pack.zip'))
 
-    // 缩略图：只复制"页面上真正会被显示"的那些
-    // 线上站每套只展示 previewCount 张预览 + 封面，其余缩略图永远不会被访客请求
-    // → 不复制可把每套文件数从 ~44 降到 ~11（Cloudflare Pages 免费额度是每站点 2 万文件）
+    // 缩略图：全部部署，webp 与 jpg 两种格式都带上（jpg 作为老浏览器回退）
+    // 清晰度优先：100 套约 8500 个文件，仍在 Pages 免费额度 2 万以内
     if (s.hasThumbs) {
       const thumbOut = join(outDir, 'thumbs')
-      const keep = (LITE && config.deployThumbs !== 'all')
-        ? new Set([...s.previews.map(f => s.thumbFor[f]).filter(Boolean), s.coverThumb].filter(Boolean))
-        : new Set([...s.thumbs, s.coverThumb].filter(Boolean))
+      const keep = new Set([...s.thumbs, ...Object.values(s.thumbAlt || {}), s.coverThumb].filter(Boolean))
       mkdirSync(thumbOut, { recursive: true })
       keep.forEach(f => copyFileSync(join(s.dir, 'thumbs', f), join(thumbOut, f)))
       deployedThumbCount += keep.size
@@ -1179,7 +1193,7 @@ function build() {
       slug: s.slug, title: s.title, displayTitle: s.displayTitle,
       series: s.series, model: s.model, date: s.date, tags: s.tags,
       imageCount: s.imageCount, packSize: s.packSize,
-      cover: s.coverThumb ? `set/${s.slug}/thumbs/${s.coverThumb}` : (s.coverFile ? `set/${s.slug}/${s.coverFile}` : ''),
+      cover: s.coverThumb ? `set/${s.slug}/thumbs/${s.coverThumb}${verQ(s.thumbVer[s.coverThumb])}` : (s.coverFile ? `set/${s.slug}/${s.coverFile}` : ''),
     })),
   }, null, 2))
   writeFileSync(join(DIST, '.nojekyll'), '')
@@ -1207,7 +1221,7 @@ function build() {
     + `\n</channel></rss>\n`)
 
   console.log(`✓ 构建完成：${sets.length} 套图集 · ${totalPages} 个列表页 → dist/`)
-  console.log(`  缩略图部署 ${deployedThumbCount} 个${LITE && config.deployThumbs !== 'all' ? '（仅预览图与封面；SITE_LITE=0 本地构建会包含全部）' : ''}`)
+  console.log(`  缩略图部署 ${deployedThumbCount} 个`)
   // 原图托管地址是内网 IP 时提醒：公网访客打不开这些链接
   if (OL && /^https?:\/\/(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(String(OL.base))) {
     console.warn(`! OpenList 地址是内网地址（${OL.base}）→ 公网访客点「原图」「打开原图目录」会打不开`)

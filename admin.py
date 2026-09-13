@@ -5,7 +5,7 @@
 
 启动：  python admin.py            → http://127.0.0.1:8091
 能力：
-  · 上传多张图片 → 自动生成缩略图（1080px，详情页预览）+ LQIP 模糊占位图（20px）
+  · 上传多张图片 → 自动生成缩略图（1920px，详情页预览）+ LQIP 模糊占位图（20px）
   · 封面自动 600x800 裁切；可指定封面图
   · 上传后自动重建静态站（node build.mjs）
   · 【编辑已发布图集】改标题/系列/日期/模特/标签/密码/网盘/像素/描述、
@@ -33,10 +33,11 @@ from PIL import Image, ImageOps
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SETS_DIR = os.path.join(ROOT, 'sets')
 PORT = int(os.environ.get('ADMIN_PORT', '8091'))
-PREVIEW_W = 1080      # 详情页预览缩略图宽度（2 列布局 ≈560px 显示 → 1080 高清）
+PREVIEW_W = 1920      # 详情页预览缩略图宽度（清晰度优先：1080p 屏整屏观看也不糊）
 LQIP_W = 20           # 模糊占位图宽度
-COVER_W, COVER_H = 600, 800
-THUMB_Q = 84
+COVER_W, COVER_H = 800, 1067   # 封面（列表卡片 2x 屏清晰）
+THUMB_Q = 88          # JPEG 质量
+WEBP_Q = 86           # WebP 质量（同质量下体积更小）
 IMG_EXT = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff'}
 # 后台访问密码（留空=不校验，仅本机使用时可不设；部署到公网务必设置）
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
@@ -82,10 +83,10 @@ def make_thumb(src_bytes: bytes, dst: str, width: int, quality: int = THUMB_Q, b
     lqip = out.copy()
     lqip.thumbnail((LQIP_W, LQIP_W * 4), Image.LANCZOS)
     lqip.save(re.sub(r'\.jpg$', '.lqip.jpg', dst), 'JPEG', quality=40)
-    # WebP 版本（体积通常再小 25-35%，构建时用 <picture> 优先使用）
+    # WebP 版本（体积通常再小 25-35%，构建时优先使用，jpg 作为老浏览器回退）
     if WEBP_ENABLED:
         try:
-            out.save(re.sub(r'\.jpg$', '.webp', dst), 'WEBP', quality=quality, method=5)
+            out.save(re.sub(r'\.jpg$', '.webp', dst), 'WEBP', quality=WEBP_Q, method=6)
         except Exception as e:  # noqa
             print(f'[admin] WebP 生成失败（忽略）: {e}')
     return out.size
@@ -116,7 +117,7 @@ def ensure_thumbs(set_dir: str, force=False):
     # 封面缩略图
     cover = next((c for c in ('cover.jpg', 'cover.jpeg', 'cover.png', 'cover.webp') if os.path.exists(os.path.join(set_dir, c))), None)
     if cover and (force or not os.path.exists(os.path.join(thumb_dir, 'cover.jpg'))):
-        make_thumb(open(os.path.join(set_dir, cover), 'rb').read(), os.path.join(thumb_dir, 'cover.jpg'), 480, 85, box=(480, 640))
+        make_thumb(open(os.path.join(set_dir, cover), 'rb').read(), os.path.join(thumb_dir, 'cover.jpg'), 640, 88, box=(640, 854))
     return n
 
 
@@ -581,7 +582,7 @@ def home_page(msg=''):
     sets = list_sets()
     body = f"""
 <h1>图集管理后台</h1>
-<p class="sub">上传 → 自动生成缩略图(1080px)+模糊占位图 → 写入 sets/ → 重建静态站 · 端口 {PORT}</p>
+<p class="sub">上传 → 自动生成缩略图({PREVIEW_W}px)+模糊占位图 → 写入 sets/ → 重建静态站 · 端口 {PORT}</p>
 <form class="panel" id="f" method="post" action="/upload" enctype="multipart/form-data">
   <h2>① 新建图集</h2>
   <div class="grid2">
@@ -598,7 +599,7 @@ def home_page(msg=''):
   </div>
   <div><label style="margin-top:12px">描述（可选）</label><textarea name="description" rows="2"></textarea></div>
   <div class="drop" id="drop"><div><strong>拖拽图片到这里</strong> 或 <strong>点击选择</strong>（可多选）</div>
-    <div style="font-size:12px;margin-top:6px">缩略图 {PREVIEW_W}px 自动生成 · 封面自动 600×800 裁切</div>
+    <div style="font-size:12px;margin-top:6px">缩略图 {PREVIEW_W}px 自动生成 · 封面自动 {COVER_W}×{COVER_H} 裁切</div>
     <input type="file" id="imgs" name="images" accept="image/*" multiple hidden></div>
   <div class="files" id="files"></div>
   <div class="row"><label style="margin:0"><input type="checkbox" id="mkcover"> 另选封面图</label>
@@ -1013,7 +1014,7 @@ class Handler(BaseHTTPRequestHandler):
             if os.path.isfile(src):
                 set_dir = os.path.join(SETS_DIR, slug)
                 make_thumb(open(src, 'rb').read(), os.path.join(set_dir, 'cover.jpg'), COVER_W, 88, box=(COVER_W, COVER_H))
-                make_thumb(open(src, 'rb').read(), os.path.join(set_dir, 'thumbs', 'cover.jpg'), 480, 85, box=(480, 640))
+                make_thumb(open(src, 'rb').read(), os.path.join(set_dir, 'thumbs', 'cover.jpg'), 640, 88, box=(640, 854))
                 ok, out = rebuild()
                 return self._text(f'封面已更新为 {img}（{out.splitlines()[0] if out else ""}）')
             return self._text('图片不存在', 404)
@@ -1162,11 +1163,11 @@ class Handler(BaseHTTPRequestHandler):
             x2 = max(x1 + 10, min(W, box[2])); y2 = max(y1 + 10, min(H, box[3]))
             crop = im.crop((x1, y1, x2, y2)).resize((COVER_W, COVER_H), Image.LANCZOS)
             crop.save(os.path.join(set_dir, 'cover.jpg'), 'JPEG', quality=90, optimize=True, progressive=True)
-            thumb = crop.copy(); thumb.thumbnail((480, 640), Image.LANCZOS)
-            thumb.save(os.path.join(set_dir, 'thumbs', 'cover.jpg'), 'JPEG', quality=85)
+            thumb = crop.copy(); thumb.thumbnail((640, 854), Image.LANCZOS)
+            thumb.save(os.path.join(set_dir, 'thumbs', 'cover.jpg'), 'JPEG', quality=88)
             if WEBP_ENABLED:
                 try:
-                    thumb.save(os.path.join(set_dir, 'thumbs', 'cover.webp'), 'WEBP', quality=85, method=5)
+                    thumb.save(os.path.join(set_dir, 'thumbs', 'cover.webp'), 'WEBP', quality=WEBP_Q, method=6)
                 except Exception:
                     pass
             ok, out = rebuild()
@@ -1282,7 +1283,7 @@ class Handler(BaseHTTPRequestHandler):
         cover_info = ''
         if cover_src:
             size = make_thumb(cover_src, os.path.join(set_dir, 'cover.jpg'), COVER_W, 88, box=(COVER_W, COVER_H))
-            make_thumb(cover_src, os.path.join(thumb_dir, 'cover.jpg'), 480, 85, box=(480, 640))
+            make_thumb(cover_src, os.path.join(thumb_dir, 'cover.jpg'), 640, 88, box=(640, 854))
             cover_info = f'封面 {size[0]}x{size[1]}'
 
         if 'pack' in form and getattr(form['pack'], 'filename', ''):
