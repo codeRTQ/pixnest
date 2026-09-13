@@ -481,16 +481,18 @@ function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets
   const siteList = allSets || sets
   const siteBytes = siteList.reduce((n, s) => n + (s.bytes || 0), 0)
   const siteCount = siteList.reduce((n, s) => n + (s.imageCount || 0), 0)
+  const siteBits = `共 ${total} 套${siteBytes ? ` · ${siteCount} 张 · 合计 <b class="size-strong">${esc(fmtSize(siteBytes))}</b>` : ''}${totalPages > 1 ? ` · 第 ${page} / ${totalPages} 页（本页 ${sets.length} 套）` : ''}`
   const body = `
-  <div class="page-head">
-    <h1>最新图集</h1>
-    <p class="sub">共 ${total} 套${siteBytes ? ` · ${siteCount} 张 · 合计 <b class="size-strong">${esc(fmtSize(siteBytes))}</b>` : ''}${totalPages > 1 ? ` · 第 ${page} / ${totalPages} 页（本页 ${sets.length} 套）` : ''}</p>
+  <div class="page-head" data-site-bits="${esc(siteBits)}">
+    <h1>全部图集</h1>
+    <p class="sub">${siteBits}</p>
   </div>
   <div class="filters" id="filters">
     <select id="sortSel" title="排序方式">
       <option value="date-desc">最新发布</option>
       <option value="date-asc">最早发布</option>
       <option value="count-desc">图片最多</option>
+      <option value="size-desc">体积最大</option>
       <option value="title-asc">标题排序</option>
     </select>
     <span class="filter-chips" id="filterChips"></span>
@@ -1218,6 +1220,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         if (v === 'date-desc') arr.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
         else if (v === 'date-asc') arr.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         else if (v === 'count-desc') arr.sort((a, b) => (b.imageCount || 0) - (a.imageCount || 0));
+        else if (v === 'size-desc') arr.sort((a, b) => (b.bytes || 0) - (a.bytes || 0));
         else if (v === 'title-asc') arr.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'zh-CN'));
         return arr;
       };
@@ -1231,9 +1234,14 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         grid.innerHTML = list.map(cardHtml).join('');
         const head = document.querySelector('.page-head');
         if (head) {
-          head.innerHTML = '<h1>' + (q ? '搜索结果' : '最新图集') + '</h1><p class="sub">'
-            + (q ? '匹配「' + esc(q) + '」共 ' + all.length + ' 套 · <a href="' + base + 'index.html" class="dim">清除筛选</a>'
-                 : '共 ' + INDEX.count + ' 套') + '</p>';
+          // 标题保持中性（下面有排序选择器，"最新图集"会自相矛盾）；排序条件写在副标题里
+          const sortLabel = sortSel && sortSel.options[sortSel.selectedIndex] ? sortSel.options[sortSel.selectedIndex].textContent.trim() : '';
+          const isDefaultSort = !sortSel || sortSel.value === 'date-desc';
+          const siteBits = (head.dataset.siteBits || '');
+          head.innerHTML = '<h1>' + (q ? '搜索结果' : '全部图集') + '</h1><p class="sub">'
+            + (q ? '匹配「' + esc(q) + '」共 ' + all.length + ' 套' + (isDefaultSort ? '' : ' · ' + esc(sortLabel))
+                 + ' · <a href="' + base + 'index.html" class="dim">清除筛选</a>'
+                 : siteBits + (isDefaultSort ? '' : ' · <span class="dim">按' + esc(sortLabel) + '</span>')) + '</p>';
         }
         // 静态分页只在没筛选时显示；筛选时用客户端分页（注意别抓错元素：客户端那条也在 .pagination-wrap 里）
         const staticPager = document.querySelector('.static-pager');
