@@ -969,21 +969,21 @@ img{max-width:100%;display:block}
 .hero{display:grid;grid-template-columns:minmax(0,1fr) 284px;gap:14px;margin:18px 0 16px;align-items:start}
 .hero.single{grid-template-columns:1fr}
 .hero-stage{position:relative;border-radius:14px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
-.hero-track{position:relative;aspect-ratio:16/9;min-height:200px}
+.hero-track{position:relative;aspect-ratio:${config.heroRatio || '21/9'};max-height:${config.heroMaxHeight || 380}px;min-height:150px}
 .hero-slide{position:absolute;inset:0;display:block;opacity:0;transition:opacity .55s ease;text-decoration:none;color:#fff;pointer-events:none}
 .hero-slide.on{opacity:1;pointer-events:auto}
 .hero-slide img{width:100%;height:100%;object-fit:cover;object-position:center 22%;display:block}
 .hero-slide::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.15) 0%,rgba(0,0,0,.25) 45%,rgba(0,0,0,.82) 100%)}
-.hero-info{position:absolute;left:20px;right:20px;bottom:18px;z-index:2;display:flex;flex-direction:column;gap:7px;align-items:flex-start}
-.hero-badge{background:rgba(255,180,84,.92);color:#1a1206;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px}
-.hero-info h2{margin:0;font-size:20px;line-height:1.35;text-shadow:0 2px 12px rgba(0,0,0,.55)}
-.hero-meta{color:rgba(255,255,255,.86);font-size:13px;text-shadow:0 1px 8px rgba(0,0,0,.5)}
-.hero-cta{background:var(--accent);color:#fff;padding:7px 16px;border-radius:999px;font-size:13px;margin-top:2px}
-.hero-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:34px;height:34px;border-radius:50%;
-  border:1px solid rgba(255,255,255,.35);background:rgba(0,0,0,.45);color:#fff;font-size:18px;line-height:1;cursor:pointer;backdrop-filter:blur(4px)}
+.hero-info{position:absolute;left:18px;right:18px;bottom:14px;z-index:2;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+.hero-badge{background:rgba(255,180,84,.92);color:#1a1206;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px}
+.hero-info h2{margin:0;font-size:18px;line-height:1.3;text-shadow:0 2px 12px rgba(0,0,0,.55)}
+.hero-meta{color:rgba(255,255,255,.86);font-size:12.5px;text-shadow:0 1px 8px rgba(0,0,0,.5)}
+.hero-cta{background:var(--accent);color:#fff;padding:5px 14px;border-radius:999px;font-size:12.5px;margin-top:1px}
+.hero-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:32px;height:32px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.35);background:rgba(0,0,0,.45);color:#fff;font-size:17px;line-height:1;cursor:pointer;backdrop-filter:blur(4px)}
 .hero-nav:hover{background:rgba(0,0,0,.7)}
 .hero-prev{left:10px}.hero-next{right:10px}
-.hero-dots{position:absolute;left:20px;bottom:16px;z-index:3;display:flex;gap:6px;transform:translateY(0)}
+.hero-dots{position:absolute;right:18px;bottom:14px;z-index:3;display:flex;gap:6px}
 .hero-dot{width:8px;height:8px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.45);cursor:pointer}
 .hero-dot.on{background:#fff;width:20px;border-radius:999px}
 /* 右侧置顶清单：一眼看全，点一下就切换，不用等自动播放 */
