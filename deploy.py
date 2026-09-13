@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import mimetypes
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -353,19 +354,67 @@ def oss_upload():
     print(f'访问地址：https://{bucket}.{endpoint}/{prefix + "/" if prefix else ""}index.html')
 
 
+def verify_deploy(project, deployment_id, base_url=None):
+    """发布后校验：先看本次部署的独立域名（无缓存）里的产物时间戳，
+    再看自定义域是否已跟上。避免"以为发布了、线上其实还是旧版"。"""
+    import json as _json
+    import re as _re
+    import urllib.request
+
+    local_idx = os.path.join(DIST, 'search-index.json')
+    local_stamp = ''
+    if os.path.exists(local_idx):
+        try:
+            local_stamp = _json.load(open(local_idx, encoding='utf-8')).get('generatedAt', '')
+        except Exception:  # noqa
+            pass
+
+    def stamp_of(url):
+        req = urllib.request.Request(url, headers={'Cache-Control': 'no-cache', 'User-Agent': 'img-site-deploy-check'})
+        with urllib.request.urlopen(req, timeout=25) as r:
+            return _json.loads(r.read().decode('utf-8', 'replace')).get('generatedAt', '')
+
+    print('\n── 发布校验 ──')
+    try:
+        dep = stamp_of(f'https://{deployment_id}.{project}.pages.dev/search-index.json')
+        same = (dep == local_stamp)
+        print(f'  {"✅" if same else "⚠️"} 本次部署产物时间戳：{dep}（本地 {local_stamp}）'
+              + ('' if same else ' → 上传的内容与本地不一致'))
+    except Exception as e:  # noqa
+        print(f'  ⚠️ 读取本次部署产物失败：{e}（不影响已上传的结果）')
+    if base_url:
+        try:
+            live = stamp_of(base_url.rstrip('/') + '/search-index.json?cb=' + str(int(time.time())))
+            ok = (live == local_stamp)
+            print(f'  {"✅ 自定义域已生效" if ok else "⚠️ 自定义域还是旧内容"}：{live}'
+                  + ('' if ok else ' → 多半是边缘缓存，等 1 分钟或加 ?cb= 参数强刷'))
+        except Exception as e:  # noqa
+            print(f'  ⚠️ 访问自定义域失败：{e}')
+
+
 def cloudflare(project='img-site', branch='main'):
     if shutil.which('wrangler') is None and shutil.which('npx') is None:
         sys.exit('× 未找到 wrangler / npx，请先 npm i -g wrangler && wrangler login')
     print(f'\n=== 4/4 部署到 Cloudflare Pages（项目 {project}）===')
     cmd = (['wrangler'] if shutil.which('wrangler') else ['npx', 'wrangler'])
-    r = sh(cmd + ['pages', 'deploy', 'dist', f'--project-name={project}', f'--branch={branch}',
-                  '--commit-dirty=true'], shell=(os.name == 'nt'))
-    # 上传失败必须让整个脚本以非零退出，否则调用方（如后台一键发布）会误判成功
-    if r is None or r.returncode != 0:
-        code = 'None' if r is None else r.returncode
-        sys.exit(f'× 上传失败（退出码 {code}）—— 线上仍是上一个版本，可重试')
+    args = cmd + ['pages', 'deploy', 'dist', f'--project-name={project}', f'--branch={branch}',
+                  '--commit-dirty=true']
+    print('$', ' '.join(args), flush=True)
+    # 自己捕获输出再打印：wrangler 直写控制台会被 Python 缓冲挤到输出流开头，
+    # 让人以为"没跑"，也拿不到部署 ID（发布校验需要）。
+    r = subprocess.run(args, cwd=ROOT, shell=(os.name == 'nt'),
+                       capture_output=True, text=True, encoding='utf-8', errors='replace')
+    out = (r.stdout or '') + (r.stderr or '')
+    print(out.rstrip(), flush=True)
+    if r.returncode != 0:
+        sys.exit(f'× 上传失败（退出码 {r.returncode}）—— 线上仍是上一个版本，可重试')
+    m = re.search(r'https://([0-9a-f]{8})\.[a-z0-9-]+\.pages\.dev', out)
     print(f'\n访问地址：https://{project}.pages.dev/')
     print('自定义域：Cloudflare 控制台 → Pages → 该项目 → Custom domains 添加你的域名')
+    if m:
+        verify_deploy(project, m.group(1), BASE_URL or None)
+    else:
+        print('  ⚠️ 没能从 wrangler 输出里解析出部署地址，跳过发布校验')
 
 
 def sftp(spec):
