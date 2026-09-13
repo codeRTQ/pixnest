@@ -710,6 +710,25 @@ input:focus,textarea:focus{border-color:var(--accent)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
 .files{margin-top:10px;font-size:12px;color:var(--dim);max-height:110px;overflow:auto}
 .sets{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
+/* 紧凑列表视图：图集多时一屏能扫更多，缩略图缩小到 40px */
+.sets[data-view="list"]{grid-template-columns:1fr;gap:6px}
+.sets[data-view="list"] .set{display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:8px}
+.sets[data-view="list"] .set img{width:40px;height:53px;flex:0 0 40px;border-radius:5px;object-fit:cover}
+.sets[data-view="list"] .set .body{flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding:0}
+.sets[data-view="list"] .set .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
+.sets[data-view="list"] .set .m{white-space:nowrap;color:var(--dim);font-size:12px}
+.sets[data-view="list"] .set .acts{opacity:1;padding:0}
+.sets[data-view="list"] .set .pick{position:static;margin-right:2px}
+/* 分页（与前台同一套 Bootstrap 分页规范）*/
+.pagination-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;margin:18px 0 6px}
+.pagination-wrap[hidden]{display:none}
+.pagination{display:flex;flex-wrap:wrap;gap:5px;list-style:none;margin:0;padding:0;justify-content:center}
+.pagination .page-link{display:block;min-width:34px;text-align:center;padding:6px 10px;border:1px solid var(--line);
+  border-radius:8px;background:var(--panel2);color:var(--fg);text-decoration:none;font-size:13px;line-height:1.25}
+.pagination .page-item:not(.disabled):not(.active) .page-link:hover{border-color:var(--accent);color:var(--accent)}
+.pagination .page-item.active .page-link{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.pagination .page-item.disabled .page-link{opacity:.45;cursor:not-allowed}
+.pagination-info{color:var(--dim);font-size:12.5px;margin:0}
 .set{background:var(--panel2);border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;transition:border-color .15s,transform .15s}
 .set:hover{border-color:var(--accent);transform:translateY(-2px)}
 .set img{width:100%;aspect-ratio:3/4;object-fit:cover;background:#111;display:block}
@@ -931,23 +950,111 @@ def page(title, body, extra_js=''):
 <script>{JS}{extra_js}</script></body></html>"""
 
 
-def sets_cards(sets):
+def filter_sort_sets(sets, q='', sort='date-desc'):
+    """后台图集列表的服务端筛选与排序（数量上千也不会卡）"""
+    q = (q or '').strip().lower()
+    if q:
+        parts = [p for p in q.split() if p]
+        def hit(s):
+            m = s['meta']
+            hay = ' '.join([str(m.get('title') or ''), s['slug'], str(m.get('model') or ''),
+                            str(m.get('series') or ''), ' '.join(m.get('tags') or []), str(m.get('date') or '')]).lower()
+            return all(p in hay for p in parts)
+        sets = [s for s in sets if hit(s)]
+    if sort == 'date-asc':
+        sets = sorted(sets, key=lambda s: str(s['meta'].get('date') or ''))
+    elif sort == 'title-asc':
+        sets = sorted(sets, key=lambda s: str(s['meta'].get('title') or s['slug']))
+    elif sort == 'count-desc':
+        sets = sorted(sets, key=lambda s: -int(s['count'] or 0))
+    elif sort == 'size-desc':
+        sets = sorted(sets, key=lambda s: -set_dir_size(os.path.join(SETS_DIR, s['slug'])))
+    else:
+        sets = sorted(sets, key=lambda s: str(s['meta'].get('date') or ''), reverse=True)
+    return sets
+
+
+_dir_size_cache = {}
+
+
+def set_dir_size(d):
+    """原图总字节数。按目录 mtime 缓存：图集多时（按体积排序要算全部套）不会每次都遍历图片"""
+    p = os.path.join(d, 'images')
+    if not os.path.isdir(p):
+        return 0
+    try:
+        st = os.stat(p)
+    except OSError:
+        return 0
+    key = (st.st_mtime, st.st_size)
+    hit = _dir_size_cache.get(p)
+    if hit and hit[0] == key:
+        return hit[1]
+    n = 0
+    try:
+        for f in os.listdir(p):
+            fp = os.path.join(p, f)
+            if os.path.isfile(fp):
+                n += os.path.getsize(fp)
+    except OSError:
+        return 0
+    _dir_size_cache[p] = (key, n)
+    return n
+
+
+def pager_html(page, total_pages, base_qs):
+    """后台分页（和前台同一套 Bootstrap 分页规范）"""
+    if total_pages <= 1:
+        return ''
+    W = 2
+    nums = {1, total_pages}
+    for p in range(page - W, page + W + 1):
+        if 1 <= p <= total_pages:
+            nums.add(p)
+    arr = sorted(nums)
+    it = lambda inner, cls='': f'<li class="page-item{" " + cls if cls else ""}">{inner}</li>'
+    lk = lambda p, label: it(f'<a class="page-link" href="?{base_qs}&amp;page={p}">{label}</a>')
+    dead = lambda label: it(f'<span class="page-link">{label}</span>', 'disabled')
+    out = [lk(1, '« 首页') if page > 1 else dead('« 首页'),
+           lk(page - 1, '‹ 上一页') if page > 1 else dead('‹ 上一页')]
+    prev = 0
+    for p in arr:
+        if prev and p - prev > 1:
+            out.append(it('<span class="page-link">…</span>', 'disabled'))
+        out.append(it(f'<span class="page-link" aria-current="page">{p}</span>', 'active') if p == page else lk(p, str(p)))
+        prev = p
+    out.append(lk(page + 1, '下一页 ›') if page < total_pages else dead('下一页 ›'))
+    out.append(lk(total_pages, '末页 »') if page < total_pages else dead('末页 »'))
+    return (f'<nav class="pagination-wrap" aria-label="分页导航"><ul class="pagination">{"".join(out)}</ul>'
+            f'<p class="pagination-info">第 {page} / {total_pages} 页</p></nav>')
+
+
+def sets_cards(sets, view='card'):
     cards = []
     for s in sets:
         m = s['meta']
         img = f'<img src="{s["coverUrl"]}" alt="" loading="lazy">' if s['coverUrl'] else '<div style="aspect-ratio:3/4;background:#111"></div>'
         title = (m.get('title') or s['slug'])
-        cards.append(f"""<div class="set" data-slug="{s['slug']}" data-search="{title.lower()} {s['slug'].lower()} {(m.get('model') or '').lower()} {','.join(m.get('tags', [])).lower()}"
+        size = fmt_size(set_dir_size(os.path.join(SETS_DIR, s['slug'])))
+        search = f"{title} {s['slug']} {m.get('model') or ''} {' '.join(m.get('tags') or [])}".lower()
+        cards.append(f"""<div class="set" data-slug="{s['slug']}" data-search="{esc_attr(search)}"
              onclick="location.href='/edit?slug={quote(s['slug'])}'" title="点击编辑这套图集">
           <input type="checkbox" class="pick" data-slug="{s['slug']}" onclick="event.stopPropagation();togglePick(this)" title="选择用于批量操作">{img}<div class="body">
           <div class="t">{title}</div>
-          <div class="m">{m.get('date','')} · {s['count']}P{' · 含压缩包' if s['hasPack'] else ''}</div>
+          <div class="m">{m.get('date','')} · {s['count']}P{(' · ' + size) if size else ''}{' · 含压缩包' if s['hasPack'] else ''}{(' · ' + str(m.get('model'))) if m.get('model') else ''}</div>
           <div class="acts">
             <a class="mini" href="/edit?slug={quote(s['slug'])}" onclick="event.stopPropagation()">编辑</a>
             <a class="mini" href="http://127.0.0.1:8090/set/{quote(s['slug'])}/index.html" target="_blank" onclick="event.stopPropagation()">预览</a>
             <button class="mini" onclick="event.stopPropagation();del('{s['slug']}')">删除</button>
           </div></div></div>""")
-    return ''.join(cards) or '<p class="sub">暂无图集，先上传一套</p>'
+    return ''.join(cards) or '<p class="sub">没有匹配的图集</p>'
+
+
+def fmt_size(n):
+    if not n:
+        return ''
+    gb = n / 1073741824
+    return f'{gb:.2f}GB' if gb >= 1 else f'{n / 1048576:.0f}MB'
 
 
 def links_page(msg=''):
@@ -1679,8 +1786,35 @@ if(tf)tf.addEventListener('input',()=>{const q=tf.value.trim().toLowerCase();let
     return page('标签管理', body, extra)
 
 
-def home_page(msg=''):
-    sets = list_sets()
+SORTS = [('date-desc', '最新在前'), ('date-asc', '最早在前'), ('title-asc', '按标题'),
+         ('count-desc', '图片最多'), ('size-desc', '体积最大')]
+
+
+def home_page(msg='', q='', page_no=1, per=24, sort='date-desc', view='card'):
+    # 注意：页码参数不能叫 page —— 会遮蔽模块级的 page() 渲染函数（踩过一次）
+    all_sets = list_sets()
+    filtered = filter_sort_sets(all_sets, q, sort)
+    total_all, total_hit = len(all_sets), len(filtered)
+    try:
+        page_no = max(1, int(page_no))
+    except Exception:  # noqa
+        page_no = 1
+    try:
+        per = int(per)
+    except Exception:  # noqa
+        per = 24
+    if per <= 0:                      # per=0 → 显示全部（老习惯：想看全部就选它）
+        per = total_hit or 1
+    total_pages = max(1, (total_hit + per - 1) // per)
+    page_no = min(page_no, total_pages)
+    start = (page_no - 1) * per
+    page_sets = filtered[start:start + per]
+    range_from = start + 1 if total_hit else 0
+    range_to = min(start + per, total_hit)
+    base_qs = '&'.join([f'q={quote(q)}'] if q else []) + (f'&sort={sort}' if sort != 'date-desc' else '') \
+        + (f'&per={per}' if per != 24 else '') + (f'&view={view}' if view != 'card' else '')
+    base_qs = base_qs.lstrip('&') or 'per=24'
+    sets = all_sets  # 顶部统计/其它区块仍用全量
     body = f"""
 <h1>图集管理后台</h1>
 <p class="sub">上传 → 自动生成缩略图(长边 {PREVIEW_LONG}px)+模糊占位图 → 写入 sets/ → 重建静态站 · 端口 {PORT}</p>
@@ -1716,18 +1850,29 @@ def home_page(msg=''):
     <span class="sub" id="upProgress" style="margin:0"></span></div>
   <div class="progress" id="progWrap" hidden><div class="bar" id="progBar"></div></div>
 </form>
-<div class="panel"><h2>② 已有图集（{len(sets)} 套）<span class="sub" style="font-weight:400"> · 点击卡片即可编辑</span></h2>
-  <div class="row" style="margin:0 0 14px">
-    <input type="text" id="setFilter" placeholder="筛选图集（标题/模特/标签/目录名）…" style="max-width:320px">
-    <select id="quickJump" onchange="if(this.value)location.href='/edit?slug='+encodeURIComponent(this.value)" style="max-width:260px;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--fg)">
-      <option value="">快速跳转到编辑…</option>
-      {''.join(f'<option value="{s["slug"]}">{s["meta"].get("title") or s["slug"]}</option>' for s in sets)}
+<div class="panel"><h2>② 已有图集（{total_all} 套{(' · 筛选出 ' + str(total_hit) + ' 套') if q else ''}）<span class="sub" style="font-weight:400"> · 点击卡片即可编辑</span></h2>
+  <form class="row" method="get" action="/" style="margin:0 0 12px;align-items:center">
+    <input type="search" name="q" value="{esc_attr(q)}" placeholder="搜索标题 / 模特 / 标签 / 系列 / 目录名（回车=全库搜索）" style="max-width:340px">
+    <select name="sort" onchange="this.form.submit()" style="padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--fg)">
+      {''.join(f'<option value="{v}"{" selected" if sort == v else ""}>{label}</option>' for v, label in SORTS)}
     </select>
-  </div>
-  <div class="sets" id="setsGrid">{sets_cards(sets)}</div>
-  <p class="sub" id="setEmpty" hidden>没有匹配的图集</p>
+    <select name="per" onchange="this.form.submit()" style="padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--fg)">
+      {''.join(f'<option value="{v}"{" selected" if per == v else ""}>每页 {v if v else "全部"} 套</option>' for v in (12, 24, 48, 96, 0))}
+    </select>
+    <button class="btn ghost sm" type="submit">搜索</button>
+    {f'<a class="btn ghost sm" href="/">清除筛选</a>' if q else ''}
+    <span class="sub" style="margin:0">显示第 <b>{range_from}</b>–<b>{range_to}</b> 条，共 <b>{total_hit}</b> 套</span>
+    <span style="flex:1"></span>
+    <select id="viewSel" onchange="setView(this.value)" style="padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--fg)">
+      <option value="card">卡片视图</option>
+      <option value="list">紧凑列表</option>
+    </select>
+  </form>
+  <div class="sets" id="setsGrid">{sets_cards(page_sets)}</div>
+  <p class="sub" id="setEmpty" hidden>当前页没有匹配的图集（试试按回车做全库搜索）</p>
+  {pager_html(page_no, total_pages, base_qs)}
   <div class="bulk">
-    <span class="sub" style="margin:0">已选 <b id="pickCount">0</b> 套：</span>
+    <span class="sub" style="margin:0">已选 <b id="pickCount">0</b> 套<span id="pickOther"></span>：</span>
     <input type="text" id="bulkSeries" placeholder="批量设置系列">
     <button class="btn ghost sm" onclick="bulkSetSeries()">应用系列</button>
     <input type="text" id="bulkTags" placeholder="批量追加标签（逗号分隔）">
@@ -1924,6 +2069,27 @@ function saveCrop(slug){
 // 图集筛选
 const sf=document.getElementById('setFilter'),sg=document.getElementById('setsGrid'),se=document.getElementById('setEmpty');
 if(sf&&sg){sf.addEventListener('input',()=>{const q=sf.value.trim().toLowerCase();let n=0;[...sg.querySelectorAll('.set')].forEach(c=>{const hit=!q||(c.dataset.search||'').includes(q);c.hidden=!hit;if(hit)n++});if(se)se.hidden=n!==0})}
+// ── 视图切换（卡片 / 紧凑列表），记住选择 ──
+function setView(v){v=(v==='list')?'list':'card';document.getElementById('setsGrid').dataset.view=v;
+  var sel=document.getElementById('viewSel');if(sel)sel.value=v;try{localStorage.setItem('adminSetView',v)}catch(e){}}
+(function(){var v='__VIEW__';try{v=localStorage.getItem('adminSetView')||v}catch(e){}setView(v)})();
+// ── 跨页勾选：勾中的 slug 存在 sessionStorage，翻页/搜索后依然记得 ──
+function pickedStore(){try{return new Set(JSON.parse(sessionStorage.getItem('adminPicked')||'[]'))}catch(e){return new Set()}}
+function savePicked(s){try{sessionStorage.setItem('adminPicked',JSON.stringify([...s]))}catch(e){}}
+function refreshPickUI(){
+  const st=pickedStore();const onPage=[...document.querySelectorAll('.pick')];
+  document.querySelectorAll('.pick').forEach(cb=>{cb.checked=st.has(cb.dataset.slug);cb.closest('.set').classList.toggle('picked',cb.checked)});
+  const here=onPage.filter(c=>st.has(c.dataset.slug)).length;
+  const el=document.getElementById('pickCount');if(el)el.textContent=st.size;
+  const o=document.getElementById('pickOther');if(o)o.textContent=(st.size>here?('（本页 '+here+' 套，其余 '+(st.size-here)+' 套在其他页）'):'');
+}
+""".replace('__VIEW__', view or 'card')
+    extra += """
+function togglePick(cb){const st=pickedStore();if(cb.checked)st.add(cb.dataset.slug);else st.delete(cb.dataset.slug);savePicked(st);refreshPickUI()}
+function clearPick(){savePicked(new Set());refreshPickUI()}
+// 批量操作取"跨页勾选"的全集（分页后 DOM 里只有当前页）
+function picked(){return [...pickedStore()]}
+window.addEventListener('DOMContentLoaded',refreshPickUI);
 """
     if msg:
         extra += f'window.addEventListener("load",()=>toast({json.dumps(msg, ensure_ascii=False)},true));'
@@ -2133,7 +2299,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._deny()
         u = urlparse(self.path)
         if u.path in ('/', '/index.html'):
-            return self._html(home_page())
+            from urllib.parse import parse_qs, unquote as _unq
+            qs = parse_qs(u.query or '')
+            g = lambda k, d='': (_unq(qs.get(k, [d])[0]) if qs.get(k) else d)
+            return self._html(home_page(
+                q=g('q'),
+                page_no=g('page', '1'),
+                per=g('per', '24'),
+                sort=g('sort', 'date-desc'),
+                view=g('view', 'card'),
+            ))
         if u.path == '/edit':
             qs = dict(p.split('=', 1) for p in u.query.split('&') if '=' in p)
             from urllib.parse import unquote
