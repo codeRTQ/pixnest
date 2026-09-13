@@ -199,12 +199,20 @@ function readSet(slug) {
   const packPath = join(dir, 'pack.zip')
   const hasPack = existsSync(packPath)
   // 缩略图（上传后台生成）：thumbs/<同名>.jpg；LQIP 占位图：thumbs/<同名>.lqip.jpg（极小，内联为模糊占位）
-  const thumbs = listImages(join(dir, 'thumbs')).filter(f => !f.endsWith('.lqip.jpg') && !f.endsWith('.webp'))
-  const hasThumbs = thumbs.length > 0
-  const webpThumbs = new Set(listImages(join(dir, 'thumbs')).filter(f => f.endsWith('.webp')).map(f => f.replace(/\.webp$/, '.jpg')))
-  const coverThumb = ['cover.jpg', 'cover.jpeg', 'cover.png', 'cover.webp'].find(f => existsSync(join(dir, 'thumbs', f)))
+  const thumbAll = listImages(join(dir, 'thumbs')).filter(f => !f.endsWith('.lqip.jpg'))
+  const thumbSet = new Set(thumbAll)
+  const hasThumbs = thumbAll.length > 0
+  // 每张原图用哪个缩略图文件：优先 .webp（体积约为 jpg 的一半），没有才退回 .jpg
+  const thumbFor = {}
+  for (const f of images) {
+    const webp = f.replace(/\.[^.]+$/, '.webp')
+    if (thumbSet.has(webp)) thumbFor[f] = webp
+    else if (thumbSet.has(f)) thumbFor[f] = f
+  }
+  const thumbs = Object.values(thumbFor)
+  const coverThumb = ['cover.webp', 'cover.jpg', 'cover.jpeg', 'cover.png'].find(f => existsSync(join(dir, 'thumbs', f)))
   const lqip = {}
-  for (const f of thumbs) {
+  for (const f of images) {
     const p = join(dir, 'thumbs', f.replace(/\.[^.]+$/, '.lqip.jpg'))
     if (existsSync(p)) lqip[f] = 'data:image/jpeg;base64,' + readFileSync(p).toString('base64')
   }
@@ -244,8 +252,8 @@ function readSet(slug) {
     coverThumb,
     images,
     thumbs,
+    thumbFor,
     hasThumbs,
-    webpThumbs,
     lqip,
     modelInfo: meta.modelInfo || '',
     profile: meta.profile || null,
@@ -438,7 +446,7 @@ function detailPage(s, prev, next, canonical = '', related = []) {
     </div>
     <dl class="dl-info">
       ${s.password ? `<div><dt>解压密码</dt><dd><code>${esc(s.password)}</code></dd></div>` : ''}
-      ${s.netdisk ? `<div><dt>原图存放</dt><dd>${esc(s.netdisk)}</dd></div>` : ''}
+      ${s.netdisk ? `<div><dt>${s.olDir ? '原图存放' : '下载网盘'}</dt><dd>${esc(s.netdisk)}</dd></div>` : ''}
       ${s.resolution ? `<div><dt>图片像素</dt><dd>${esc(s.resolution)}</dd></div>` : ''}
       <div><dt>图片数量</dt><dd>${s.imageCount} 张</dd></div>
       ${s.packSize ? `<div><dt>压缩包大小</dt><dd>${esc(s.packSize)}</dd></div>` : ''}
@@ -449,13 +457,14 @@ function detailPage(s, prev, next, canonical = '', related = []) {
   const previews = s.previews.length
     ? `<div class="previews" id="gallery">
       ${s.previews.map((f, i) => {
-        const thumb = s.hasThumbs ? `thumbs/${f}` : `images/${f}`
-        const useWebp = s.hasThumbs && s.webpThumbs.has(f)
+        // 缩略图文件：优先 webp（体积约为 jpg 一半），没有才用 jpg；构建时只会部署这一个
+        const tf = s.thumbFor[f] || f
+        const thumb = s.hasThumbs ? `thumbs/${tf}` : `images/${f}`
         const ph = s.lqip[f] ? `src="${s.lqip[f]}"` : ''
         const size = s.sizes[f] || { w: 1200, h: 1600 }
         // 精简模式：原图未随站点部署，画廊大图用缩略图，并标注像素
         const bigSrc = LITE
-          ? `${rel}set/${s.slug}/${useWebp ? thumb.replace(/\.jpg$/, '.webp') : thumb}`
+          ? `${rel}set/${s.slug}/${thumb}`
           : `${rel}set/${s.slug}/images/${f}`
         const bigW = LITE ? Math.min(size.w, 1080) : size.w
         const bigH = LITE ? Math.round(bigW / (size.w / size.h)) : size.h
@@ -468,8 +477,7 @@ function detailPage(s, prev, next, canonical = '', related = []) {
            data-pswp-srcset="${rel}set/${s.slug}/${thumb} 1080w"
            data-orig-w="${size.w}" data-orig-h="${size.h}"
            target="_blank" rel="noopener">
-          <img class="ph" ${ph} data-src="${rel}set/${s.slug}/${useWebp ? thumb.replace(/\.jpg$/, '.webp') : thumb}"
-               ${useWebp ? `data-fallback="${rel}set/${s.slug}/${thumb}"` : ''}
+          <img class="ph" ${ph} data-src="${rel}set/${s.slug}/${thumb}"
                alt="${esc(s.title)} 预览图 ${i + 1}" decoding="async">
         </a>
         ${olUrl ? `<a class="orig-link" href="${esc(olUrl)}" target="_blank" rel="noopener" title="在${esc(s.netdisk || 'OpenList')}打开原图（${size.w}×${size.h}）">原图 ↗</a>` : ''}
@@ -478,7 +486,7 @@ function detailPage(s, prev, next, canonical = '', related = []) {
       }).join('')}
     </div>
     <p class="stream-hint" id="streamHint">已加载 <span id="loadedCount">0</span> / ${s.previews.length} 张预览 · 滚动时自动加载 · <b>点击图片打开画廊</b>${s.olDir ? ` · 右上角「原图 ↗」直达原图` : ''}</p>
-    ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张，以上为部分预览 · ${s.olDir ? `完整原图请到 <a href="${esc(s.olDir)}" target="_blank" rel="noopener">${esc(s.netdisk || 'OpenList')}</a> 查看` : '完整图集请下载压缩包'}</p>` : ''}`
+    ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张，以上为部分预览 · ${s.olDir ? `完整原图请到 <a href="${esc(s.olDir)}" target="_blank" rel="noopener">${esc(s.netdisk || 'OpenList')}</a> 查看` : (s.downloadUrl ? `完整图集请点上方下载按钮${s.netdisk ? `（${esc(s.netdisk)}）` : ''}` : '完整图集请下载压缩包')}</p>` : ''}`
     : '<p class="empty">暂无预览图</p>'
 
   const body = `
@@ -1013,6 +1021,7 @@ function build() {
   }
 
   // 详情页 + 资源
+  let deployedThumbCount = 0
   sets.forEach((s, i) => {
     const outDir = join(DIST, 'set', s.slug)
     mkdirSync(outDir, { recursive: true })
@@ -1027,11 +1036,17 @@ function build() {
     // 压缩包（精简模式下不复制，依赖网盘外链）
     if (s.hasPack && !LITE) copyFileSync(s.packPath, join(outDir, 'pack.zip'))
 
-    // 缩略图
+    // 缩略图：只复制"页面上真正会被显示"的那些
+    // 线上站每套只展示 previewCount 张预览 + 封面，其余缩略图永远不会被访客请求
+    // → 不复制可把每套文件数从 ~44 降到 ~11（Cloudflare Pages 免费额度是每站点 2 万文件）
     if (s.hasThumbs) {
       const thumbOut = join(outDir, 'thumbs')
+      const keep = (LITE && config.deployThumbs !== 'all')
+        ? new Set([...s.previews.map(f => s.thumbFor[f]).filter(Boolean), s.coverThumb].filter(Boolean))
+        : new Set([...s.thumbs, s.coverThumb].filter(Boolean))
       mkdirSync(thumbOut, { recursive: true })
-      s.thumbs.forEach(f => copyFileSync(join(s.dir, 'thumbs', f), join(thumbOut, f)))
+      keep.forEach(f => copyFileSync(join(s.dir, 'thumbs', f), join(thumbOut, f)))
+      deployedThumbCount += keep.size
     }
 
     // 封面
@@ -1192,6 +1207,7 @@ function build() {
     + `\n</channel></rss>\n`)
 
   console.log(`✓ 构建完成：${sets.length} 套图集 · ${totalPages} 个列表页 → dist/`)
+  console.log(`  缩略图部署 ${deployedThumbCount} 个${LITE && config.deployThumbs !== 'all' ? '（仅预览图与封面；SITE_LITE=0 本地构建会包含全部）' : ''}`)
   // 原图托管地址是内网 IP 时提醒：公网访客打不开这些链接
   if (OL && /^https?:\/\/(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(String(OL.base))) {
     console.warn(`! OpenList 地址是内网地址（${OL.base}）→ 公网访客点「原图」「打开原图目录」会打不开`)
