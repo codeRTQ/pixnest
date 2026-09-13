@@ -638,6 +638,12 @@ def batch_page():
     <div><label>默认模特（可空）</label><input type="text" id="bModel" placeholder="例：许岚"></div>
     <div><label>默认标签（逗号分隔，可空）</label><input type="text" id="bTags" placeholder="例：制服,黑丝"></div>
     <div><label>日期</label><input type="date" id="bDate" value="{date.today().isoformat()}"></div>
+    <div><label>每套图集位于选中目录下的第几层</label>
+      <select id="bDepth">
+        <option value="1" selected>第 1 层（选中「许岚」，下面直接是各套图）</option>
+        <option value="2">第 2 层（选中「天翼云盘(crypt)」，许岚/NO.001 这样）</option>
+        <option value="3">第 3 层</option>
+      </select></div>
   </div>
   <div class="row">
     <label style="margin:0"><input type="checkbox" id="bAutoTag"> 同时 AI 打标（很慢：每套 10-30 秒，建议导入后统一跑「批量自动打标」）</label>
@@ -658,13 +664,14 @@ def batch_page():
 const bdrop=document.getElementById('bdrop'),bfolder=document.getElementById('bfolder');
 const IMGRE2=/\\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
 let groups=[];   // [{name, files:[File]}]
+let lastFiles=[]; // 最近一次选中的全部文件（改层级/模特时重新分组用）
 bdrop.onclick=()=>bfolder.click();
 bdrop.ondragover=e=>{e.preventDefault();bdrop.classList.add('on')};
 bdrop.ondragleave=()=>bdrop.classList.remove('on');
 bdrop.ondrop=async e=>{
   e.preventDefault();bdrop.classList.remove('on');
   const items=[...(e.dataTransfer.items||[])].map(i=>i.webkitGetAsEntry&&i.webkitGetAsEntry()).filter(Boolean);
-  if(!items.length){setGroups(buildGroups([...e.dataTransfer.files]));return}
+  if(!items.length){lastFiles=[...e.dataTransfer.files];setGroups(buildGroups(lastFiles));return}
   toast('正在读取文件夹…');
   const entries=[];
   for(const en of items)await walkEntry(en,entries);
@@ -675,15 +682,19 @@ bdrop.ondrop=async e=>{
     try{Object.defineProperty(f,'webkitRelativePath',{value:(en.fullPath||'').replace(/^\\//,'')})}catch(err){}
     files.push(f);
   }
-  setGroups(buildGroups(files));
+  lastFiles=files;setGroups(buildGroups(files));
 };
-bfolder.onchange=()=>setGroups(buildGroups([...bfolder.files]));
-// 按「第一层子文件夹」分组（选了父文件夹时）或按各自文件夹名分组（拖入多个文件夹时）
+bfolder.onchange=()=>{lastFiles=[...bfolder.files];setGroups(buildGroups(lastFiles))};
+// 按「第 N 层子文件夹」分组（N 由下拉框决定，默认 1 = 选中目录的直接子文件夹）
 function buildGroups(files){
+  const depth=Math.max(1,Math.min(3,parseInt(document.getElementById('bDepth').value||'1',10)));
   const map=new Map();
   files.filter(f=>IMGRE2.test(f.name)).forEach(f=>{
     const rel=(f.webkitRelativePath||f.name).split('/');
-    const key=rel.length>2?rel[1]:(rel.length===2?rel[0]:'(未命名)');
+    // rel[0] 是选中的根目录，所以「第 N 层」= rel[N]；文件层级不够时归到最接近的那层
+    let key, idx=Math.min(depth, rel.length-1);
+    if(idx<1){key='(未命名)'}
+    else{key=rel.slice(1, idx+1).join(' / ')}
     if(!map.has(key))map.set(key,[]);
     map.get(key).push(f);
   });
@@ -710,6 +721,7 @@ function setGroups(g){
   document.getElementById('bMsg').textContent=groups.length?('共 '+groups.reduce((s,x)=>s+x.files.length,0)+' 张图片'):'';
 }
 document.getElementById('bModel').addEventListener('input',()=>setGroups(groups));
+document.getElementById('bDepth').addEventListener('change',()=>{if(lastFiles.length)setGroups(buildGroups(lastFiles))});
 // 逐套上传（串行，便于看进度；不逐套重建，最后统一重建一次）
 async function startBatch(){
   if(!groups.length)return;
@@ -736,7 +748,7 @@ async function startBatch(){
     try{
       const r=await fetch('/upload',{method:'POST',body:fd});
       const j=await r.json();
-      if(j.ok){done++;log.textContent+='✓ ['+(done+fail)+'/'+groups.length+'] '+title+' — '+j.images+' 张（共 '+j.total+'）'+(j.dup?(' · 跳过重复 '+j.dup):'')+'\\n'}
+      if(j.ok){done++;log.textContent+='✓ ['+(done+fail)+'/'+groups.length+'] '+title+' — '+(j.unchanged?('无新增（'+j.dup+' 张内容已存在）'):(j.images+' 张（共 '+j.total+'）'+(j.dup?(' · 跳过重复 '+j.dup):'')))+'\\n'}
       else{fail++;log.textContent+='✗ '+title+' — '+(j.error||'失败')+'\\n'}
     }catch(e){fail++;log.textContent+='✗ '+title+' — '+e+'\\n'}
     bar.style.width=Math.round((done+fail)/groups.length*100)+'%';
@@ -1705,6 +1717,18 @@ class Handler(BaseHTTPRequestHandler):
             saved = [n for n in saved
                      if os.path.exists(os.path.join(thumb_dir, os.path.splitext(n)[0] + '.jpg'))]
         if not saved:
+            # 一张都没新增：要区分「全是重复内容（正常，等于重新导了一次）」和「真的都失败了」
+            if dup and not errors:
+                if g('norebuild') in ('1', 'on', 'true'):
+                    return self._json({'ok': True, 'slug': slug, 'title': title, 'images': 0,
+                                       'total': len(set_images(set_dir)), 'dup': dup,
+                                       'errors': [], 'unchanged': True})
+                ok, out = rebuild()
+                return self._html(home_page(
+                    f'ℹ️ {slug}：本次没有新增图片 —— {dup} 张与已有内容完全相同（已跳过）\n'
+                    f'  该图集现有 {len(set_images(set_dir))} 张\n'
+                    f'  编辑：http://127.0.0.1:{PORT}/edit?slug={slug}\n'
+                    + '  重建：' + ('成功' if ok else '失败') + '\n' + out))
             return self._text('全部图片处理失败：' + '; '.join(errors), 400)
 
         cover_src = None
