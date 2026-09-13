@@ -249,6 +249,10 @@ function readSet(slug) {
   const series = meta.series || ''
   const model = meta.model || ''
   const rawTitle = meta.title || slug
+  // 每套原图总大小：按 images/ 里真实文件字节数累加（标题里的 [41P-426MB] 也是这个口径）
+  let bytes = 0
+  for (const f of images) { try { bytes += statSync(join(dir, 'images', f)).size } catch {} }
+  const sizeText = fmtSize(bytes)
   // 列表页显示标题：[系列]日期 主题 模特[图片数P／大小]
   const displayTitle = meta.displayTitle || [
     series ? `[${series}]` : '',
@@ -275,6 +279,8 @@ function readSet(slug) {
     resolution: meta.resolution || '',
     imageCount: meta.imageCount || images.length,
     packSize: meta.packSize || (hasPack ? fmtSize(statSync(packPath).size) : ''),
+    bytes,
+    sizeText,
     hasPack,
     packPath: hasPack ? packPath : null,
     coverFile,
@@ -417,7 +423,7 @@ const card = (s, rel = '') => `
         ? `<img loading="lazy" src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="${esc(s.title)}">`
         : `<div class="no-cover">无封面</div>`}
       <span class="badge">${s.imageCount}P</span>
-      ${s.packSize ? `<span class="badge badge-size">${esc(s.packSize)}</span>` : ''}
+      ${s.sizeText ? `<span class="badge badge-size" title="原图总大小 ${esc(s.sizeText)}">${esc(s.sizeText)}</span>` : (s.packSize ? `<span class="badge badge-size">${esc(s.packSize)}</span>` : '')}
     </div>
     <h2 class="card-title">${esc(s.title)}</h2>
   </a>
@@ -536,7 +542,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
       </figure>`
       }).join('')}
     </div>
-    ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张，以上为部分预览 · ${s.olDir ? `完整原图请到 <a href="${esc(s.olDir)}" target="_blank" rel="noopener">${esc(s.netdisk || 'OpenList')}</a> 查看` : (s.downloadUrl ? `完整图集请点上方下载按钮${s.netdisk ? `（${esc(s.netdisk)}）` : ''}` : '完整图集请下载压缩包')}</p>` : ''}`
+    ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张${s.sizeText ? ` · 总大小 ${esc(s.sizeText)}` : ''}，以上为部分预览 · ${s.olDir ? `完整原图请到 <a href="${esc(s.olDir)}" target="_blank" rel="noopener">${esc(s.netdisk || 'OpenList')}</a> 查看` : (s.downloadUrl ? `完整图集请点上方下载按钮${s.netdisk ? `（${esc(s.netdisk)}）` : ''}` : '完整图集请下载压缩包')}</p>` : ''}`
     : '<p class="empty">暂无预览图</p>'
   // 加载进度提示：原来在预览区下面，现在提到预览区上方（原来「预览图（8 / 32）」标题的位置）
   const streamHint = s.previews.length
@@ -585,7 +591,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
             : ''}</span>
           <span class="ss-body">
             <b>${esc(x.title)}</b>
-            <span class="ss-meta">${esc(x.date)} · ${x.imageCount}P${x.packSize ? ' · ' + esc(x.packSize) : ''}</span>
+            <span class="ss-meta">${esc(x.date)} · ${x.imageCount}P${x.sizeText ? ' · ' + esc(x.sizeText) : (x.packSize ? ' · ' + esc(x.packSize) : '')}</span>
           </span>
         </a>`).join('')}
         ${modelTotal > moreSets.length + 1 ? `<a class="side-more" href="${rel}index.html?q=${encodeURIComponent(s.model || '')}">查看全部 ${modelTotal} 套 →</a>` : ''}
@@ -596,6 +602,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
       <dl class="side-info">
         <dt>图片数量</dt><dd>${s.imageCount} 张</dd>
         ${s.resolution ? `<dt>图片像素</dt><dd>${esc(s.resolution)}</dd>` : ''}
+        ${s.sizeText ? `<dt>总大小</dt><dd>${esc(s.sizeText)}<span class="dim"> · 单张约 ${esc(fmtSize(Math.round(s.bytes / Math.max(1, s.imageCount))))}</span></dd>` : ''}
         ${s.packSize ? `<dt>压缩包</dt><dd>${esc(s.packSize)}</dd>` : ''}
         ${s.netdisk || !hasDlTarget ? `<dt>${s.olDir ? '原图存放' : '下载方式'}</dt><dd>${hasDlTarget && s.netdisk ? esc(s.netdisk) : '<span class="dim">暂未提供下载</span>'}</dd>` : ''}
         <dt>发布时间</dt><dd>${esc(s.date)}</dd>
@@ -961,7 +968,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       '<div class="card-cover">',
       (s.cover ? '<img loading="lazy" src="' + base + s.cover + '" alt="' + esc(s.title) + '">' : '<div class="no-cover">无封面</div>'),
       '<span class="badge">' + s.imageCount + 'P</span>',
-      (s.packSize ? '<span class="badge badge-size">' + esc(s.packSize) + '</span>' : ''),
+      (s.size || s.packSize ? '<span class="badge badge-size">' + esc(s.size || s.packSize) + '</span>' : ''),
       '</div>',
       '<h2 class="card-title">' + esc(s.title) + '</h2>',
       '</a>',
@@ -1427,7 +1434,7 @@ function build() {
     sets: sets.map(s => ({
       slug: s.slug, title: s.title, displayTitle: s.displayTitle,
       series: s.series, model: s.model, date: s.date, tags: s.tags,
-      imageCount: s.imageCount, packSize: s.packSize,
+      imageCount: s.imageCount, packSize: s.packSize, size: s.sizeText, bytes: s.bytes,
       cover: s.coverThumb ? `set/${s.slug}/thumbs/${s.coverThumb}${verQ(s.thumbVer[s.coverThumb])}` : (s.coverFile ? `set/${s.slug}/${s.coverFile}` : ''),
     })),
   }, null, 2))
@@ -1462,7 +1469,7 @@ function build() {
     console.warn(`! OpenList 地址是内网地址（${OL.base}）→ 公网访客点「原图」「打开原图目录」会打不开`)
     console.warn('  对外可用需先用 Cloudflare Tunnel / 端口映射暴露，再把 site.json 的 openlist.base 换成公网域名')
   }
-  sets.slice(0, 5).forEach(s => console.log(`   · ${s.displayTitle}（${s.imageCount}P${s.packSize ? ' / ' + s.packSize : ''}）`))
+  sets.slice(0, 5).forEach(s => console.log(`   · ${s.displayTitle}（${s.imageCount}P${s.sizeText ? ' / ' + s.sizeText : ''}）`))
   if (sets.length > 5) console.log(`   … 另有 ${sets.length - 5} 套`)
 }
 
