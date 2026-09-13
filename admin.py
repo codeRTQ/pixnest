@@ -18,8 +18,10 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -166,12 +168,106 @@ def ensure_thumbs(set_dir: str, force=False):
     return n
 
 
+def set_signature(set_dir):
+    """图集内容指纹：图片张数 + 各文件大小（秒级，不用读内容）"""
+    img_dir = os.path.join(set_dir, 'images')
+    if not os.path.isdir(img_dir):
+        return ''
+    sizes = []
+    for f in os.listdir(img_dir):
+        if os.path.splitext(f)[1].lower() in IMG_EXT:
+            sizes.append(os.path.getsize(os.path.join(img_dir, f)))
+    if not sizes:
+        return ''
+    return hashlib.md5((str(len(sizes)) + '|' + ','.join(map(str, sorted(sizes)))).encode()).hexdigest()
+
+
+def find_duplicate_sets(set_dir, exclude_slug=''):
+    """找出与这套图集内容相同的其它图集（返回 [slug, ...]）"""
+    sig = set_signature(set_dir)
+    if not sig:
+        return []
+    hits = []
+    for name in os.listdir(SETS_DIR):
+        d = os.path.join(SETS_DIR, name)
+        if name == exclude_slug or not os.path.isdir(d) or d == set_dir:
+            continue
+        if set_signature(d) == sig:
+            hits.append(name)
+    return hits
+
+
 def rebuild():
+    # 发布进行中禁止重建：deploy.py 正从 dist/ 读取上传，此时重建会换掉内容导致上传不一致
+    if _pub['running']:
+        return False, ('✗ 正在发布到线上（已用 %d 秒），请等发布完成后再重建站点。\n'
+                       '  发布过程中改动 dist/ 会导致上传内容新旧混杂。'
+                       % int(time.time() - _pub['started']))
     try:
         r = subprocess.run(['node', 'build.mjs'], cwd=ROOT, capture_output=True, text=True, timeout=300)
         return r.returncode == 0, ((r.stdout or '') + (r.stderr or '')).strip()
     except Exception as e:  # noqa
         return False, f'重建失败：{e}'
+
+
+# ─────────────────── 一键发布到线上（Cloudflare Pages） ───────────────────
+# 在后台点一下 = 构建（精简+公网模式）→ 体检 → 打包 → 上传，约 40 秒
+PAGES_PROJECT = os.environ.get('PAGES_PROJECT', 'pixnest-gallery')
+SITE_URL = os.environ.get('SITE_URL', 'https://pixnest.dpdns.org')
+_pub_lock = threading.Lock()
+_pub = {'running': False, 'ok': None, 'lines': [], 'started': 0.0, 'ended': 0.0, 'started_at': ''}
+
+
+def _proxy_env():
+    """本机有 Clash(7890) 在监听就带上代理（wrangler 要访问 Cloudflare API）"""
+    env = dict(os.environ)
+    try:
+        with socket.create_connection(('127.0.0.1', 7890), timeout=0.3):
+            env['HTTPS_PROXY'] = 'http://127.0.0.1:7890'
+            env['HTTP_PROXY'] = 'http://127.0.0.1:7890'
+    except Exception:  # noqa
+        pass
+    return env
+
+
+def publish_start():
+    """后台启动发布线程；返回 (是否启动, 提示)"""
+    with _pub_lock:
+        if _pub['running']:
+            return False, '已有发布任务在进行中'
+        _pub.update({'running': True, 'ok': None, 'lines': [], 'started': time.time(),
+                     'ended': 0.0, 'started_at': time.strftime('%H:%M:%S')})
+
+    def run():
+        cmd = [sys.executable, '-u', 'deploy.py', '--cloudflare', '--project', PAGES_PROJECT, '--base-url', SITE_URL]
+        _pub['lines'].append('$ ' + ' '.join(cmd[1:]))
+        try:
+            p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 text=True, encoding='utf-8', errors='replace', env=_proxy_env(), bufsize=1)
+            for line in p.stdout:
+                _pub['lines'].append(line.rstrip('\n'))
+                if len(_pub['lines']) > 600:
+                    del _pub['lines'][:200]
+            p.wait(timeout=900)
+            ok = (p.returncode == 0)
+            _pub['lines'].append('✅ 发布完成' if ok else f'✗ 发布失败（退出码 {p.returncode}）')
+        except Exception as e:  # noqa
+            ok = False
+            _pub['lines'].append(f'✗ 发布异常：{e}')
+        finally:
+            _pub['running'] = False
+            _pub['ok'] = ok
+            _pub['ended'] = time.time()
+
+    threading.Thread(target=run, daemon=True).start()
+    return True, f'已开始发布到 {SITE_URL}（约 40 秒，期间线上访问不受影响）'
+
+
+def publish_status():
+    return {'running': _pub['running'], 'ok': _pub['ok'],
+            'lines': _pub['lines'][-120:], 'started_at': _pub['started_at'],
+            'elapsed': int((_pub['ended'] or time.time()) - _pub['started']) if _pub['started'] else 0,
+            'site': SITE_URL, 'project': PAGES_PROJECT}
 
 
 def read_meta(set_dir):
@@ -438,6 +534,11 @@ table.lk tr.bad td{color:#ff8a8a}
 .imp-title{font-weight:600;margin-bottom:10px;color:var(--accent)}
 .imp label{font-size:13px}
 .hint{color:var(--dim);font-weight:400;font-size:12px}
+/* 发布面板 */
+.pub{margin-top:14px;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--panel2)}
+.pub-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.pub pre{margin:0;max-height:280px;overflow:auto;font-size:12px;line-height:1.6;white-space:pre-wrap;
+  font-family:ui-monospace,Consolas,monospace;color:var(--fg)}
 .set .pick{position:absolute;top:8px;right:8px;width:20px;height:20px;cursor:pointer;z-index:2}
 .set{position:relative}
 .set.picked{outline:2px solid var(--accent)}
@@ -465,6 +566,30 @@ table.lk tr.bad td{color:#ff8a8a}
 JS = """
 function toast(msg,ok){document.querySelectorAll('.toast').forEach(t=>t.remove());const d=document.createElement('div');d.className='toast '+(ok===undefined?'':(ok?'ok':'err'));d.textContent=msg;document.body.appendChild(d);if(ok!==undefined)setTimeout(()=>d.remove(),4500)}
 function rebuild(){toast('正在重建…');fetch('/rebuild',{method:'POST'}).then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),900)}).catch(e=>toast('失败：'+e,false))}
+// ── 一键同步到线上（构建+体检+打包+上传，约 40 秒）──
+let pubTimer=null;
+function pubBox(){return document.getElementById('pubBox')}
+function publishNow(){
+  if(!confirm('把当前内容同步到线上？\\n\\n会执行：构建（精简·公网模式）→ 体检 → 打包 → 上传。\\n约 40 秒，只上传有变化的文件，线上访问不受影响。'))return;
+  fetch('/publish',{method:'POST'}).then(r=>r.json()).then(d=>{
+    toast(d.msg,d.started);
+    if(d.started){pubBox().hidden=false;pollPublish()}
+  }).catch(e=>toast('启动失败：'+e,false));
+}
+function publishLog(){pubBox().hidden=false;pollPublish()}
+function pollPublish(){
+  clearTimeout(pubTimer);
+  const box=pubBox(),log=document.getElementById('pubLog'),msg=document.getElementById('pubMsg');
+  fetch('/publish/status').then(r=>r.json()).then(d=>{
+    log.textContent=(d.lines||[]).join('\\n');log.scrollTop=log.scrollHeight;
+    if(d.running){msg.textContent='⏳ 发布中…（开始于 '+d.started_at+'，已用 '+d.elapsed+' 秒）';pubTimer=setTimeout(pollPublish,1500)}
+    else if(d.ok===true){msg.innerHTML='✅ 发布成功 · <a href="'+d.site+'" target="_blank">打开线上站点 ↗</a>'}
+    else if(d.ok===false){msg.textContent='❌ 发布失败（详见下方日志）'}
+    else{msg.textContent='还没有发布过'}
+  }).catch(()=>{pubTimer=setTimeout(pollPublish,3000)});
+}
+// 进页面时若正在发布（或刚发布完）自动接着显示
+fetch('/publish/status').then(r=>r.json()).then(d=>{if(d.running){pubBox().hidden=false;pollPublish()}}).catch(()=>{});
 function post(url,body,reload){return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(r=>r.text()).then(t=>{toast(t,true);if(reload!==false)setTimeout(()=>location.href=reload||location.href,700)})}
 function del(slug){if(!confirm('确定删除图集 '+slug+' ？不可恢复'))return;fetch('/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug})}).then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.href='/',700)})}
 function setCover(slug,img){if(!confirm('把 '+img+' 设为封面？'))return;post('/setcover',{slug,img},'/edit?slug='+encodeURIComponent(slug))}
@@ -483,6 +608,7 @@ function removeTag(i){TAGS.splice(i,1);renderTags()}
 function pullAiTags(){document.querySelectorAll('.chip-ai').forEach(b=>addTagValue(b.textContent))}
 document.addEventListener('DOMContentLoaded',()=>{const v=document.getElementById('tagsValue');if(v){TAGS=(v.value||'').split(',').map(s=>s.trim()).filter(Boolean);renderTags()}const ti=document.getElementById('tagInput');if(ti){ti.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();addTag()}})}initDrag()});
 function backfill(){toast('正在补齐缩略图…');fetch('/backfill',{method:'POST'}).then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),1200)}).catch(e=>toast('失败：'+e,false))}
+function dupCheck(){toast('正在比对全库内容…');fetch('/dupcheck',{method:'POST'}).then(r=>r.text()).then(t=>{alert(t);toast('检查完成',true)}).catch(e=>toast('失败：'+e,false))}
 """
 
 
@@ -805,7 +931,7 @@ async function startBatch(){
     try{
       const r=await fetch('/upload',{method:'POST',body:fd});
       const j=await r.json();
-      if(j.ok){done++;log.textContent+='✓ ['+(done+fail)+'/'+groups.length+'] '+title+' — '+(j.unchanged?('无新增（'+j.dup+' 张内容已存在）'):(j.images+' 张（共 '+j.total+'）'+(j.dup?(' · 跳过重复 '+j.dup):'')))+'\\n'}
+      if(j.ok){done++;log.textContent+='✓ ['+(done+fail)+'/'+groups.length+'] '+title+' — '+(j.unchanged?('无新增（'+j.dup+' 张内容已存在）'):(j.images+' 张（共 '+j.total+'）'+(j.dup?(' · 跳过重复 '+j.dup):'')))+(j.dup_of&&j.dup_of.length?('  ⚠️ 与已有图集内容相同：'+j.dup_of.join(', ')):(j.same_title&&j.same_title.length?('  ⚠️ 已有同名图集：'+j.same_title.join(', ')):''))+'\\n'}
       else{fail++;log.textContent+='✗ '+title+' — '+(j.error||'失败')+'\\n'}
     }catch(e){fail++;log.textContent+='✗ '+title+' — '+e+'\\n'}
     bar.style.width=Math.round((done+fail)/groups.length*100)+'%';
@@ -813,7 +939,8 @@ async function startBatch(){
   }
   msg.textContent='正在重建站点（'+done+' 套成功'+(fail?(', '+fail+' 套失败'):'')+'）…';
   try{await fetch('/rebuild',{method:'POST'})}catch(e){}
-  msg.innerHTML='✅ 完成：成功 '+done+' 套'+(fail?(', 失败 '+fail+' 套'):'')+' · <a href="/">返回后台查看</a>（可在列表里逐个编辑标题/标签）';
+  msg.innerHTML='✅ 完成：成功 '+done+' 套'+(fail?(', 失败 '+fail+' 套'):'')+' · <a href="/">返回后台查看</a>（可在列表里逐个编辑标题/标签）'+
+    '<br><button class="btn" style="margin-top:10px" onclick="location.href=\'/\'">去后台同步到线上 →</button>';
   toast('批量导入完成：成功 '+done+' 套',fail===0);
   btn.disabled=false;
 }
@@ -1000,13 +1127,20 @@ def home_page(msg=''):
     <button class="btn ghost sm" onclick="clearPick()">清空选择</button>
   </div>
   <div class="row"><button class="btn ghost" onclick="rebuild()">重新构建站点</button>
+  <button class="btn" onclick="publishNow()">🚀 同步到线上</button>
+  <button class="btn ghost" onclick="publishLog()">查看发布日志</button>
   <button class="btn ghost" onclick="backfill()">补齐所有缩略图</button>
   <button class="btn ghost" onclick="detectResAll()">📐 自动检测所有图集像素</button>
   <button class="btn ghost" onclick="autotagAll()">🤖 批量自动打标（未打标的图集）</button>
+  <button class="btn ghost" onclick="dupCheck()">🔍 查重复图集</button>
   <a class="btn ghost" href="/tags">🏷 标签管理</a>
   <a class="btn ghost" href="/links">🔗 批量导入网盘链接</a>
   <a class="btn ghost" href="/batch">📚 批量导入文件夹（多套）</a>
-  <a class="btn ghost" href="http://127.0.0.1:8090/" target="_blank">打开站点预览 ↗</a></div></div>"""
+  <a class="btn ghost" href="http://127.0.0.1:8090/" target="_blank">打开站点预览 ↗</a></div>
+  <div class="pub" id="pubBox" hidden>
+    <div class="pub-head"><b>发布到线上</b><span id="pubMsg" class="sub" style="margin:0"></span></div>
+    <pre id="pubLog"></pre>
+  </div></div>"""
     extra = """
 const drop=document.getElementById('drop'),imgs=document.getElementById('imgs'),files=document.getElementById('files');
 const mk=document.getElementById('mkcover'),cf=document.getElementById('coverfile'),pc=document.getElementById('pickcover'),cn=document.getElementById('covername');
@@ -1421,6 +1555,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(links_page())
         if u.path == '/batch':
             return self._html(batch_page())
+        if u.path == '/publish/status':
+            return self._json(publish_status())
         if u.path.startswith('/preview/'):
             from urllib.parse import unquote
             return self._serve_file(unquote(u.path[len('/preview/'):]))
@@ -1657,9 +1793,27 @@ class Handler(BaseHTTPRequestHandler):
                 ok, out = rebuild()
                 return self._text(f'已清理 {n} 张重复图片' if n else '没有发现重复图片')
             return self._text('图集不存在', 404)
+        if u.path == '/dupcheck':
+            groups = {}
+            for s in list_sets():
+                sig = set_signature(os.path.join(SETS_DIR, s['slug']))
+                if sig:
+                    groups.setdefault(sig, []).append(s['slug'])
+            dups = {k: v for k, v in groups.items() if len(v) > 1}
+            if not dups:
+                return self._text(f'✅ 检查了 {len(groups)} 套图集，没有内容重复的')
+            lines = [f'发现 {len(dups)} 组内容重复的图集（共 {sum(len(v) for v in dups.values())} 套）：', '']
+            for v in dups.values():
+                lines.append('  · ' + '  ==  '.join(v))
+            lines.append('')
+            lines.append('建议：保留信息更全的那套（标签/资料），删掉多余的（列表卡片右下角「删除」）')
+            return self._text('\n'.join(lines))
         if u.path == '/rebuild':
             ok, out = rebuild()
             return self._text(out)
+        if u.path == '/publish':
+            started, msg = publish_start()
+            return self._json({'started': started, 'msg': msg}, 200 if started else 409)
         if u.path == '/backfill':
             total = 0
             for s in list_sets():
@@ -1834,15 +1988,28 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa
                 tag_info = f'  ⚠️ 自动打标失败（可稍后在编辑页重试）：{e}\n'
 
+        # 与全库比对：内容与别的图集完全相同 → 提醒（常见于重复导入同一套图）
+        dup_sets = find_duplicate_sets(set_dir, exclude_slug=slug)
+        same_title = [s['slug'] for s in list_sets()
+                      if s['slug'] != slug and (s['meta'].get('title') or '').strip() == title.strip()]
+        dup_warn = ''
+        if dup_sets:
+            dup_warn = (f'⚠️ 这套图集的内容与已有图集完全相同：{", ".join(dup_sets)}\n'
+                        f'   如果只是重复导入，可到后台删掉其中一套（列表卡片右下角「删除」）。\n')
+        elif same_title:
+            dup_warn = (f'⚠️ 已有同名图集（标题相同、内容不同）：{", ".join(same_title)}\n'
+                        f'   如果这是同一套图的新版本，建议先删掉旧的。\n')
+
         if g('norebuild') in ('1', 'on', 'true'):
             # 批量导入：不逐套重建（前端在全部完成后统一调一次 /rebuild），直接回 JSON
             return self._json({'ok': True, 'slug': slug, 'title': title,
                                'images': len(saved), 'total': len(all_imgs),
                                'dup': dup, 'errors': errors, 'cover': cover_info,
-                               'autotag': tag_info.strip()})
+                               'dup_of': dup_sets, 'same_title': same_title, 'autotag': tag_info.strip()})
         ok, out = rebuild()
         msg = (f'✓ 上传完成：{slug}\n  本次新增 {len(saved)} 张，共 {len(all_imgs)} 张，{cover_info}\n'
                + (f'  已跳过 {dup} 张重复图片（内容相同）\n' if dup else '')
+               + dup_warn
                + tag_info
                + f'  编辑：http://127.0.0.1:{PORT}/edit?slug={slug}\n  详情页：http://127.0.0.1:8090/set/{slug}/index.html\n'
                + (f'  警告：{"; ".join(errors)}\n' if errors else '')

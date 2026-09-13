@@ -32,6 +32,8 @@ const defaultConfig = {
   baseUrl: '',
   setsPerPage: 12,
   previewCount: 8,
+  relatedCount: 4,           // 详情页「相关推荐」条数（4 条正好一行）
+  assetSalt: '2',            // CSS/JS 版本盐：assets 是 immutable 长缓存，改了样式若边缘缓存不刷新，把它 +1 即可强制换 URL
   icp: '',
   // 合规相关（部署前请按当地法律与平台要求配置）
   adultGate: false,          // true = 访问前显示“18+ 内容确认”闸门
@@ -289,8 +291,9 @@ function readSet(slug) {
 
 // ─────────────────────────── 相关推荐 / 分类页 ───────────────────────────
 
-/** 计算某套图集的相关推荐（同系列 > 同模特 > 共享标签多者优先） */
-function relatedSets(set, all, limit = 6) {
+/** 计算某套图集的相关推荐（同系列 > 同模特 > 共享标签多者优先）
+ *  条数由 site.json 的 relatedCount 控制，默认 4（正好一行）*/
+function relatedSets(set, all, limit = config.relatedCount || 4) {
   return all
     .filter(s => s.slug !== set.slug)
     .map(s => {
@@ -405,11 +408,11 @@ const card = (s, rel = '') => `
   </div>
 </article>`
 
-function listPage(sets, page, totalPages, rel = '') {
+function listPage(sets, page, totalPages, rel = '', total = sets.length) {
   const body = `
   <div class="page-head">
     <h1>最新图集</h1>
-    <p class="sub">共 ${sets.length} 套</p>
+    <p class="sub">共 ${total} 套${totalPages > 1 ? ` · 第 ${page} / ${totalPages} 页（本页 ${sets.length} 套）` : ''}</p>
   </div>
   <div class="filters" id="filters">
     <select id="sortSel" title="排序方式">
@@ -590,8 +593,10 @@ img{max-width:100%;display:block}
 .cloud-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg);text-decoration:none;font-size:13px}
 .cloud-chip span{background:var(--panel2);border-radius:999px;padding:1px 8px;color:var(--dim);font-size:12px}
 .cloud-chip:hover{border-color:var(--accent)}
-.grid.related{grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}
+.grid.related{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
 .grid.related .card-title{font-size:13px}
+/* 窄屏：相关推荐排 2 列，避免卡片过窄 */
+@media (max-width:760px){.grid.related{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .cats{display:flex;gap:8px;overflow-x:auto;padding:10px 20px;max-width:1180px;margin:0 auto}
 .cats a{white-space:nowrap;padding:5px 12px;border:1px solid var(--line);border-radius:999px;color:var(--dim);font-size:13px}
 .cats a:hover,.cats a.on{color:var(--fg);border-color:var(--accent);background:rgba(91,140,255,.12)}
@@ -1015,6 +1020,7 @@ function build() {
   rmSync(DIST, { recursive: true, force: true })
   mkdirSync(join(DIST, 'assets'), { recursive: true })
   ASSET_V = createHash('sha1').update(STYLE + APP).digest('hex').slice(0, 8)
+    + (config.assetSalt ? '-' + config.assetSalt : '')
   ANALYTICS = ANALYTICS_RAW()
   // 安全网：APP 是模板字符串，正则里的反斜杠转义容易被吃掉（曾导致整站 JS 静默失效）
   // 这里只编译不执行，语法有问题立刻中断构建
@@ -1035,7 +1041,7 @@ function build() {
   for (let p = 1; p <= totalPages; p++) {
     const pageSets = sets.slice((p - 1) * per, p * per)
     const rel = p === 1 ? '' : '../../'
-    const html = listPage(pageSets, p, totalPages, rel)
+    const html = listPage(pageSets, p, totalPages, rel, sets.length)
     if (p === 1) writeFileSync(join(DIST, 'index.html'), html)
     else { mkdirSync(join(DIST, 'page'), { recursive: true }); writeFileSync(join(DIST, `page/${p}.html`), html) }
   }

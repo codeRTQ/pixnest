@@ -346,8 +346,12 @@ def cloudflare(project='img-site', branch='main'):
         sys.exit('× 未找到 wrangler / npx，请先 npm i -g wrangler && wrangler login')
     print(f'\n=== 4/4 部署到 Cloudflare Pages（项目 {project}）===')
     cmd = (['wrangler'] if shutil.which('wrangler') else ['npx', 'wrangler'])
-    sh(cmd + ['pages', 'deploy', 'dist', f'--project-name={project}', f'--branch={branch}',
-              '--commit-dirty=true'], shell=(os.name == 'nt'))
+    r = sh(cmd + ['pages', 'deploy', 'dist', f'--project-name={project}', f'--branch={branch}',
+                  '--commit-dirty=true'], shell=(os.name == 'nt'))
+    # 上传失败必须让整个脚本以非零退出，否则调用方（如后台一键发布）会误判成功
+    if r is None or r.returncode != 0:
+        code = 'None' if r is None else r.returncode
+        sys.exit(f'× 上传失败（退出码 {code}）—— 线上仍是上一个版本，可重试')
     print(f'\n访问地址：https://{project}.pages.dev/')
     print('自定义域：Cloudflare 控制台 → Pages → 该项目 → Custom domains 添加你的域名')
 
