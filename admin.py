@@ -819,7 +819,22 @@ function pollPublish(){
 // 进页面时若正在发布（或刚发布完）自动接着显示
 fetch('/publish/status').then(r=>r.json()).then(d=>{if(d.running){pubBox().hidden=false;pollPublish()}}).catch(()=>{});
 function post(url,body,reload){return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(r=>r.text()).then(t=>{toast(t,true);if(reload!==false)setTimeout(()=>location.href=reload||location.href,700)})}
-function del(slug){if(!confirm('确定删除图集 '+slug+' ？不可恢复'))return;fetch('/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug})}).then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.href='/',700)})}
+function del(slug){
+  if(!confirm('删除图集 '+slug+' ？\\n\\n会移到 _trash/ 回收站（可手动找回），然后自动重建站点。'))return;
+  toast('正在删除 '+slug+' …');
+  fetch('/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug})})
+    .then(function(r){return r.text().then(function(t){if(!r.ok)throw new Error(t);return t})})
+    .then(function(t){toast(t,true);setTimeout(function(){location.href='/'},1000)})
+    .catch(function(e){toast('删除失败：'+(e.message||e)+'（图集未受影响）',false)});
+}
+function purgeTrash(){
+  if(!confirm('清空回收站 _trash/ ？\\n\\n里面是之前删除的图集，清空后无法恢复。'))return;
+  toast('正在清空回收站…');
+  fetch('/purge-trash',{method:'POST'})
+    .then(function(r){return r.text().then(function(t){if(!r.ok)throw new Error(t);return t})})
+    .then(function(t){toast(t,true)})
+    .catch(function(e){toast('清空失败：'+(e.message||e),false)});
+}
 function setCover(slug,img){if(!confirm('把 '+img+' 设为封面？'))return;post('/setcover',{slug,img},'/edit?slug='+encodeURIComponent(slug))}
 function delImage(slug,img){if(!confirm('删除图片 '+img+' ？不可恢复'))return;post('/deleteimage',{slug,img},'/edit?slug='+encodeURIComponent(slug))}
 function dedupe(slug){if(!confirm('按内容清理重复图片（保留每组的第一张）？'))return;post('/dedupe',{slug},'/edit?slug='+encodeURIComponent(slug))}
@@ -1251,6 +1266,69 @@ def esc_attr(s):
             .replace('"', '&quot;').replace("'", '&#39;'))
 
 
+def delete_set(slug):
+    """删除图集：先整体移到 _trash/（同盘改名、秒完成、可恢复），再重建站点。
+    为什么要这样：Windows 上 shutil.rmtree 遇到被占用的文件（预览服务正在读缩略图、
+    杀软扫描）会「删一半再报错」，图集目录被掏空却还在，而且异常直接把连接掐断，
+    前端什么都看不到。改名是原子的 —— 要么成功、要么原样不动。"""
+    slug = (slug or '').strip()
+    if not slug:
+        return False, '缺少 slug'
+    p = os.path.normpath(os.path.join(SETS_DIR, slug))
+    if not p.startswith(SETS_DIR + os.sep) or not os.path.isdir(p):
+        return False, '未找到该图集'
+    files = sum(len(f) for _, _, f in os.walk(p))
+    size = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(p) for f in fs)
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    trash_dir = os.path.join(ROOT, '_trash')
+    os.makedirs(trash_dir, exist_ok=True)
+    dst = os.path.join(trash_dir, f'{stamp}-{slug}')
+    try:
+        # 必须用 os.rename：shutil.move 在改名失败（文件被占用）时会退化成「复制 + 删源」，
+        # 结果就是复制一半、源目录被删一半 —— 比直接报错糟糕得多。rename 是原子的。
+        os.rename(p, dst)
+    except OSError as e:
+        return False, (f'删除失败：无法移动图集目录（{type(e).__name__}: {e}）\n'
+                       '  图集保持原样未动。多半是文件被占用 —— 关掉正在放图的页面/预览服务，稍后重试。')
+    return True, (f'已删除「{slug}」（{files} 个文件 / {size / 1048576:.0f} MB）\n'
+                  f'  已移到回收站：_trash/{os.path.basename(dst)}（确认无误可点「清空回收站」）')
+
+
+def purge_trash():
+    """清空 _trash/（回收站里的图集彻底删除）"""
+    d = os.path.join(ROOT, '_trash')
+    if not os.path.isdir(d):
+        return True, '回收站是空的'
+    names = os.listdir(d)
+    if not names:
+        return True, '回收站是空的'
+    total = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(d) for f in fs)
+    left = rm_tree_retry(d)
+    if left:
+        return False, f'回收站里有 {left} 项被占用删不掉（关掉占用的程序后重试）'
+    return True, f'已清空回收站（{len(names)} 项 / {total / 1048576:.0f} MB）'
+
+
+def rm_tree_retry(path, tries=3):
+    """带重试的整目录删除；返回删不掉的顶层项数量"""
+    for i in range(tries):
+        if not os.path.exists(path):
+            return 0
+        try:
+            shutil.rmtree(path)
+            return 0
+        except Exception:  # noqa
+            time.sleep(0.4 * (i + 1))
+    left = 0
+    if os.path.isdir(path):
+        for name in os.listdir(path):
+            try:
+                shutil.rmtree(os.path.join(path, name), ignore_errors=False)
+            except Exception:  # noqa
+                left += 1
+    return left
+
+
 def model_stats(slugs):
     """某模特的统计：套数、张数、真实总大小、最近日期、封面图"""
     total = count = 0
@@ -1666,6 +1744,7 @@ def home_page(msg=''):
   <button class="btn ghost" onclick="autotagAll()">🤖 批量自动打标（未打标的图集）</button>
   <button class="btn ghost" onclick="dupCheck()">🔍 查重复图集</button>
   <button class="btn ghost" onclick="healthCheck()">🩺 站点体检</button>
+  <button class="btn ghost" onclick="purgeTrash()">🗑 清空回收站</button>
   <a class="btn ghost" href="/tags">🏷 标签管理</a>
   <a class="btn ghost" href="/links">🔗 批量导入网盘链接</a>
   <a class="btn ghost" href="/batch">📚 批量导入文件夹（多套）</a>
@@ -2077,6 +2156,19 @@ class Handler(BaseHTTPRequestHandler):
         self._text('not found', 404)
 
     def do_POST(self):
+        # 全局兜底：任何未预期异常都要变成一句人能看懂的话（否则异常会掐断连接，
+        # 前端 fetch 拿不到响应、页面上什么都不显示 —— 之前「删除图集点了没反应」就是这个）
+        try:
+            return self._do_post()
+        except Exception as e:  # noqa
+            import traceback
+            traceback.print_exc()
+            try:
+                self._text('✗ 后台执行出错：%s: %s' % (type(e).__name__, e), 500)
+            except Exception:  # noqa
+                pass
+
+    def _do_post(self):
         if not self._authed():
             return self._deny()
         u = urlparse(self.path)
@@ -2088,13 +2180,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.handle_links()
         if u.path == '/delete':
             d = self._json_body()
-            slug = d.get('slug', '')
-            p = os.path.join(SETS_DIR, slug)
-            if slug and os.path.isdir(p) and os.path.normpath(p).startswith(SETS_DIR):
-                shutil.rmtree(p)
-                ok, out = rebuild()
-                return self._text(f'已删除 {slug}\n{out}')
-            return self._text('未找到该图集', 404)
+            ok, msg = delete_set(d.get('slug', ''))
+            if not ok:
+                return self._text('✗ ' + msg, 400)
+            okb, out = rebuild()
+            first = next((l for l in (out or '').splitlines() if l.strip()), '')
+            return self._text(msg + '\n' + ('  ✓ 站点已重建：' + first if okb else '  ✗ 站点重建失败：' + (out or '')[:200]))
+        if u.path == '/purge-trash':
+            ok, msg = purge_trash()
+            return self._text(('✓ ' if ok else '✗ ') + msg, 200 if ok else 400)
         if u.path == '/setcover':
             d = self._json_body()
             slug, img = d.get('slug', ''), d.get('img', '')
