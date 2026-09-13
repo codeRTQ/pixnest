@@ -331,6 +331,10 @@ function relatedSets(set, all, limit = config.relatedCount || 4) {
 /** 系列页 / 标签页（静态化，利于搜索引擎收录） */
 function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
   const label = kind === 'series' ? '系列' : '标签'
+  // 该分类的合计体量：套数 + 张数 + 总大小（按每套真实字节累加）
+  const catBytes = sets.reduce((n, s) => n + (s.bytes || 0), 0)
+  const catCount = sets.reduce((n, s) => n + (s.imageCount || 0), 0)
+  const catSize = catBytes ? fmtSize(catBytes) : ''
   const cloudHtml = cloud.length
     ? `<section class="cloud-sec">
     <h2 class="sec-title">全部${label}（${cloud.length}）<span class="dim" style="font-size:13px;font-weight:400"> · 点任意一个直接切换</span></h2>
@@ -342,7 +346,7 @@ function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
   <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}collections.html#${kind}">${label}</a><span>/</span><span class="cur">${esc(name)}</span></nav>
   <div class="page-head">
     <h1>${esc(name)}</h1>
-    <p class="sub">${label}「${esc(name)}」共 ${sets.length} 套图集</p>
+    <p class="sub">${label}「${esc(name)}」共 ${sets.length} 套图集${catSize ? ` · ${catCount} 张 · 合计 <b class="size-strong">${esc(catSize)}</b>` : ''}</p>
   </div>
   <div class="grid">${sets.map(s => card(s, rel)).join('')}</div>
   <p class="more-hint"><a href="${rel}index.html" class="dim">← 返回全部图集</a></p>
@@ -350,7 +354,7 @@ function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
   const url = pageUrl(`${kind === 'series' ? 'series' : 'tag'}/${encodeURIComponent(name)}.html`)
   return layout({
     title: `${name} · ${label} - ${config.siteName}`,
-    desc: `${label}「${name}」下的全部图集，共 ${sets.length} 套。${config.siteSubtitle}`,
+    desc: `${label}「${name}」下的全部图集，共 ${sets.length} 套${catSize ? `、${catCount} 张、合计 ${catSize}` : ''}。${config.siteSubtitle}`,
     body, rel,
     canonical: url,
     og: { type: 'website', url },
@@ -434,11 +438,15 @@ const card = (s, rel = '') => `
   </div>
 </article>`
 
-function listPage(sets, page, totalPages, rel = '', total = sets.length) {
+function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets = null) {
+  // 站内总张数与总体量（整站口径，跟分页无关）
+  const siteList = allSets || sets
+  const siteBytes = siteList.reduce((n, s) => n + (s.bytes || 0), 0)
+  const siteCount = siteList.reduce((n, s) => n + (s.imageCount || 0), 0)
   const body = `
   <div class="page-head">
     <h1>最新图集</h1>
-    <p class="sub">共 ${total} 套${totalPages > 1 ? ` · 第 ${page} / ${totalPages} 页（本页 ${sets.length} 套）` : ''}</p>
+    <p class="sub">共 ${total} 套${siteBytes ? ` · ${siteCount} 张 · 合计 <b class="size-strong">${esc(fmtSize(siteBytes))}</b>` : ''}${totalPages > 1 ? ` · 第 ${page} / ${totalPages} 页（本页 ${sets.length} 套）` : ''}</p>
   </div>
   <div class="filters" id="filters">
     <select id="sortSel" title="排序方式">
@@ -628,6 +636,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
   <article class="detail">
     <h1 class="detail-title">${esc(s.title)}</h1>
     <div class="detail-meta">
+      ${s.sizeText ? `<span class="tag tag-size" title="这套图原图总大小（${s.imageCount} 张）">📦 ${esc(s.sizeText)}</span>` : ''}
       ${s.series ? `<a class="tag tag-series" href="${rel}series/${encodeURIComponent(s.series)}.html" title="查看该系列全部图集">${esc(s.series)}</a>` : ''}
       ${s.model ? `<a class="tag tag-model" href="${rel}index.html?q=${encodeURIComponent(s.model)}" title="查看该模特全部图集">模特：${esc(s.model)}</a>` : ''}
       ${s.tags.map(t => `<a class="tag tag-link" href="${rel}tag/${encodeURIComponent(t)}.html" title="查看同标签图集">#${esc(t)}</a>`).join('')}
@@ -726,6 +735,9 @@ img{max-width:100%;display:block}
 .card-meta time{flex:1 0 100%;margin:0;text-align:right}
 .tag{padding:1px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--dim);font-size:12px;text-decoration:none;display:inline-block;transition:.15s}
 .tag-series{color:var(--accent);border-color:rgba(91,140,255,.4)}
+/* 详情页标题旁的体量标签（原图总大小）＋分类页「合计」强调 */
+.tag-size{color:#4ec99a;border-color:rgba(78,201,154,.42);background:rgba(78,201,154,.10);cursor:default}
+.size-strong{color:var(--fg);font-weight:600}
 .card-meta a.tag:hover,.detail-meta a.tag:hover{color:var(--accent);border-color:var(--accent);background:rgba(91,140,255,.12)}
 .pager{display:flex;align-items:center;justify-content:center;gap:18px;margin:34px 0}
 /* 筛选栏 */
@@ -1261,7 +1273,7 @@ function build() {
   for (let p = 1; p <= totalPages; p++) {
     const pageSets = sets.slice((p - 1) * per, p * per)
     const rel = p === 1 ? '' : '../../'
-    const html = listPage(pageSets, p, totalPages, rel, sets.length)
+    const html = listPage(pageSets, p, totalPages, rel, sets.length, sets)
     if (p === 1) writeFileSync(join(DIST, 'index.html'), html)
     else { mkdirSync(join(DIST, 'page'), { recursive: true }); writeFileSync(join(DIST, `page/${p}.html`), html) }
   }
