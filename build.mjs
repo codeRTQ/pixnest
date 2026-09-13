@@ -458,7 +458,7 @@ function listPage(sets, page, totalPages, rel = '', total = sets.length) {
   })
 }
 
-function detailPage(s, prev, next, canonical = '', related = []) {
+function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}) {
   const rel = '../../'
   // 模特资料：仅展示填写过的字段（AI 不会生成这些）
   const pf = s.profile || {}
@@ -499,31 +499,6 @@ function detailPage(s, prev, next, canonical = '', related = []) {
   const profileBlock = (pfText || pfSocialItems.length)
     ? `<blockquote class="pf-quote">${pfText ? `<p>${esc(pfText)}</p>` : ''}${pfSocialItems.length ? `<p class="pf-social">${pfSocialItems.join(' · ')}</p>` : ''}</blockquote>`
     : ''
-  const downloadBlock = `
-  <section class="download">
-    <div class="dl-main">
-      ${s.olDir
-        ? `<a class="btn btn-primary" href="${esc(s.olDir)}" target="_blank" rel="noopener">⬇ 打开原图目录（${esc(s.netdisk || 'OpenList')}）</a>`
-        : (s.downloadUrl && !s.hasPack
-          ? `<a class="btn btn-primary" href="${esc(s.downloadUrl)}" target="_blank" rel="noopener">⬇ 图集下载 Download${s.netdisk ? `（${esc(s.netdisk)}）` : ''}</a>`
-          : (s.hasPack && !LITE
-            ? `<a class="btn btn-primary" href="${rel}set/${s.slug}/pack.zip" download>⬇ 下载图集压缩包（${esc(s.packSize)}）</a>`
-            : (s.hasPack && LITE
-              ? `<span class="btn btn-disabled">压缩包未随站点部署（请用网盘链接）</span>`
-              : `<span class="btn btn-disabled">暂无下载</span>`)))}
-      ${s.olDir && s.password ? `<span class="dl-hint">目录密码：<code>${esc(s.password)}</code></span>` : ''}
-      ${!s.olDir && s.shareCode ? `<span class="dl-hint">提取码：<code>${esc(s.shareCode)}</code></span>` : ''}
-    </div>
-    <dl class="dl-info">
-      ${s.password ? `<div><dt>解压密码</dt><dd><code>${esc(s.password)}</code></dd></div>` : ''}
-      ${s.shareCode ? `<div><dt>提取码</dt><dd><code>${esc(s.shareCode)}</code></dd></div>` : ''}
-      ${s.netdisk ? `<div><dt>${s.olDir ? '原图存放' : '下载网盘'}</dt><dd>${esc(s.netdisk)}</dd></div>` : ''}
-      ${s.resolution ? `<div><dt>图片像素</dt><dd>${esc(s.resolution)}</dd></div>` : ''}
-      <div><dt>图片数量</dt><dd>${s.imageCount} 张</dd></div>
-      ${s.packSize ? `<div><dt>压缩包大小</dt><dd>${esc(s.packSize)}</dd></div>` : ''}
-      <div><dt>发布时间</dt><dd>${esc(s.date)}</dd></div>
-    </dl>
-  </section>`
 
   const previews = s.previews.length
     ? `<div class="previews" id="gallery">
@@ -561,13 +536,67 @@ function detailPage(s, prev, next, canonical = '', related = []) {
     ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张，以上为部分预览 · ${s.olDir ? `完整原图请到 <a href="${esc(s.olDir)}" target="_blank" rel="noopener">${esc(s.netdisk || 'OpenList')}</a> 查看` : (s.downloadUrl ? `完整图集请点上方下载按钮${s.netdisk ? `（${esc(s.netdisk)}）` : ''}` : '完整图集请下载压缩包')}</p>` : ''}`
     : '<p class="empty">暂无预览图</p>'
 
+  // ── 右侧栏（参考同类站：下载 / 模特与系列 / 本套信息 / 热门标签）──
+  const dlBtn = s.olDir
+    ? `<a class="btn btn-primary side-dl" href="${esc(s.olDir)}" target="_blank" rel="noopener">⬇ 打开原图目录</a>`
+    : (s.downloadUrl && !s.hasPack
+      ? `<a class="btn btn-primary side-dl" href="${esc(s.downloadUrl)}" target="_blank" rel="noopener">⬇ 下载图集</a>`
+      : (s.hasPack && !LITE
+        ? `<a class="btn btn-primary side-dl" href="${rel}set/${s.slug}/pack.zip" download>⬇ 下载压缩包</a>`
+        : (s.hasPack && LITE
+          ? `<span class="btn btn-disabled side-dl">压缩包未随站点部署</span>`
+          : `<span class="btn btn-disabled side-dl">⬇ 下载链接待补充</span>`)))
+  const hasDlTarget = !!(s.olDir || s.downloadUrl || s.hasPack)
+  const dlCodes = [
+    hasDlTarget && s.netdisk ? `网盘：${esc(s.netdisk)}` : '',
+    hasDlTarget && s.shareCode ? `提取码 <code>${esc(s.shareCode)}</code>` : '',
+    hasDlTarget && s.password ? `解压密码 <code>${esc(s.password)}</code>` : '',
+  ].filter(Boolean)
+  const hotTags = Object.entries(tagCounts || {}).sort((a, b) => b[1].length - a[1].length).slice(0, 18)
+  const sideBlock = `
+  <aside class="detail-side">
+    <section class="side-box">
+      <h3 class="side-title">⬇ 下载这套图</h3>
+      <div class="side-dl-wrap">${dlBtn}</div>
+      ${dlCodes.length ? `<p class="side-note">${dlCodes.join(' · ')}</p>` : ''}
+      ${s.imageCount > s.previews.length ? `<p class="side-note dim">本页展示前 ${s.previews.length} 张预览${hasDlTarget ? `，完整 ${s.imageCount} 张请点上方按钮` : `（共 ${s.imageCount} 张）`}</p>` : ''}
+      ${!hasDlTarget && !PUBLIC ? `<p class="side-note dim">在后台「✎ 编辑这套图集」里填上网盘链接 / 提取码 / 解压密码，这里会自动变成下载按钮。</p>` : ''}
+    </section>
+    ${(s.model || s.series) ? `<section class="side-box">
+      <h3 class="side-title">👤 模特与系列</h3>
+      <div class="side-links">
+        ${s.model ? `<a class="side-link" href="${rel}index.html?q=${encodeURIComponent(s.model)}">${esc(s.model)} <span class="dim">的全部作品</span></a>` : ''}
+        ${s.series ? `<a class="side-link" href="${rel}series/${encodeURIComponent(s.series)}.html">${esc(s.series)} <span class="dim">系列全部</span></a>` : ''}
+        ${s.model ? `<a class="side-link" href="${rel}collections.html#tags"><span class="dim">按标签浏览 →</span></a>` : ''}
+      </div>
+    </section>` : ''}
+    <section class="side-box">
+      <h3 class="side-title">📋 本套信息</h3>
+      <dl class="side-info">
+        <dt>图片数量</dt><dd>${s.imageCount} 张</dd>
+        ${s.resolution ? `<dt>图片像素</dt><dd>${esc(s.resolution)}</dd>` : ''}
+        ${s.packSize ? `<dt>压缩包</dt><dd>${esc(s.packSize)}</dd>` : ''}
+        ${s.netdisk || !hasDlTarget ? `<dt>${s.olDir ? '原图存放' : '下载方式'}</dt><dd>${hasDlTarget && s.netdisk ? esc(s.netdisk) : '<span class="dim">暂未提供下载</span>'}</dd>` : ''}
+        <dt>发布时间</dt><dd>${esc(s.date)}</dd>
+        ${s.password ? `<dt>解压密码</dt><dd><code>${esc(s.password)}</code></dd>` : ''}
+      </dl>
+    </section>
+    ${hotTags.length ? `<section class="side-box">
+      <h3 class="side-title">🏷 热门标签</h3>
+      <div class="side-tags">${hotTags.map(([t, l]) =>
+        `<a class="side-tag" href="${rel}tag/${encodeURIComponent(t)}.html">${esc(t)}<span>${l.length}</span></a>`).join('')}</div>
+      <p class="side-note"><a href="${rel}collections.html#tags">查看全部标签 →</a></p>
+    </section>` : ''}
+  </aside>`
+
   const body = `
   ${PUBLIC ? '' : `<div class="admin-bar" id="adminBar" hidden>
     <a class="btn btn-primary sm" href="http://127.0.0.1:8091/edit?slug=${encodeURIComponent(s.slug)}">✎ 编辑这套图集</a>
     <a class="btn ghost sm" href="http://127.0.0.1:8091/">管理后台</a>
     <span class="dim">（仅带 ?admin=1 时显示 · 访客看不到）</span>
   </div>`}
-  <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><span class="cur">${esc(s.title)}</span></nav>
+  <nav class="breadcrumb"><a href="${rel}index.html">首页</a>${s.series ? `<span>/</span><a href="${rel}series/${encodeURIComponent(s.series)}.html">${esc(s.series)}</a>` : ''}<span>/</span><span class="cur">${esc(s.title)}</span></nav>
+  <div class="detail-layout">
   <article class="detail">
     <h1 class="detail-title">${esc(s.title)}</h1>
     <div class="detail-meta">
@@ -577,7 +606,6 @@ function detailPage(s, prev, next, canonical = '', related = []) {
     </div>
     ${profileBlock}
     ${s.description ? `<p class="detail-desc">${esc(s.description)}</p>` : ''}
-    ${downloadBlock}
     <h2 class="sec-title">预览图<span class="dim">（${s.previews.length} / ${s.imageCount}）</span></h2>
     ${previews}
     <nav class="prevnext">
@@ -586,7 +614,10 @@ function detailPage(s, prev, next, canonical = '', related = []) {
     </nav>
     ${related && related.length ? `<h2 class="sec-title">相关推荐</h2>
     <div class="grid related">${related.map(x => card(x, rel)).join('')}</div>` : ''}
-  </article>`
+  </article>
+  ${sideBlock}
+  </div>
+  <div class="mobile-dl-bar"${hasDlTarget ? '' : ' hidden'}>${dlBtn}</div>`
   return layout({
     title: `${s.title} - ${config.siteName}`,
     desc: s.description || s.modelInfo || `${s.displayTitle}${s.tags.length ? ' · ' + s.tags.join('、') : ''}`,
@@ -731,7 +762,46 @@ img{max-width:100%;display:block}
 .tag-model{color:var(--accent2);border-color:rgba(255,180,84,.4)}
 .model-info{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent2);border-radius:10px;padding:12px 14px;margin:0 0 18px;font-size:13.5px;line-height:1.7}
 .mi-label{flex:0 0 auto;color:var(--accent2);font-weight:600}
-/* 模特资料：引文式（类似 Markdown blockquote） */
+/* ── 详情页两栏布局：左预览图 + 右信息侧栏（参考同类站）── */
+.detail-layout{display:flex;gap:26px;align-items:flex-start}
+.detail-layout > .detail{flex:1;min-width:0}
+.detail-side{flex:0 0 316px;width:316px;position:sticky;top:80px;max-height:calc(100vh - 96px);overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:var(--line) transparent;padding-right:2px}
+.detail-side::-webkit-scrollbar{width:6px}
+.detail-side::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+.detail-side::-webkit-scrollbar-track{background:transparent}
+.side-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+.side-title{margin:0 0 10px;font-size:14px;font-weight:600;color:var(--accent2)}
+.side-dl-wrap{margin:0 0 8px}
+.side-box .btn{width:100%;justify-content:center;display:flex}
+.side-note{margin:8px 0 0;font-size:12px;line-height:1.7;color:var(--dim)}
+.side-note code{background:var(--panel2);padding:1px 6px;border-radius:5px;color:var(--fg)}
+.side-links{display:flex;flex-direction:column;gap:8px}
+.side-link{display:block;padding:8px 12px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);
+  color:var(--fg);text-decoration:none;font-size:13px;transition:.15s}
+.side-link:hover{border-color:var(--accent);color:var(--accent)}
+.side-info{margin:0;display:grid;grid-template-columns:auto 1fr;gap:7px 12px;font-size:13px}
+.side-info dt{color:var(--dim);white-space:nowrap}
+.side-info dd{margin:0;word-break:break-word}
+.side-info code{background:var(--panel2);padding:1px 6px;border-radius:5px}
+.side-tags{display:flex;flex-wrap:wrap;gap:6px}
+.side-tag{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;background:var(--panel2);
+  border:1px solid var(--line);color:var(--dim);font-size:12px;text-decoration:none;transition:.15s}
+.side-tag span{font-size:11px;opacity:.7}
+.side-tag:hover{color:var(--accent);border-color:var(--accent)}
+/* 窄屏：单栏 + 底部固定下载条（参考同类站的做法） */
+.mobile-dl-bar{display:none}
+.mobile-dl-bar[hidden]{display:none}
+@media (max-width:1000px){
+  .detail-layout{flex-direction:column;gap:18px}
+  .detail-side{position:static;width:100%;flex:none;max-height:none;overflow:visible}
+  body:has(.mobile-dl-bar:not([hidden])) .side-box:first-child{display:none}  /* 下载已在底部固定条里 */
+  body:has(.mobile-dl-bar:not([hidden])){padding-bottom:76px}
+  .mobile-dl-bar:not([hidden]){display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;
+    padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));gap:10px;align-items:center;justify-content:center;
+    background:color-mix(in srgb, var(--bg) 92%, transparent);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+  .mobile-dl-bar .btn{width:100%;max-width:420px;justify-content:center;display:flex}
+}
 .pf-quote{margin:0 0 20px;padding:10px 0 10px 16px;border-left:3px solid var(--accent);
   background:linear-gradient(90deg,rgba(91,140,255,.07),transparent 60%);
   border-radius:0 8px 8px 0;color:var(--dim);font-size:14px;line-height:1.95;letter-spacing:.01em}
@@ -1104,12 +1174,19 @@ function build() {
     else { mkdirSync(join(DIST, 'page'), { recursive: true }); writeFileSync(join(DIST, `page/${p}.html`), html) }
   }
 
+  // ── 系列 / 标签统计（详情页侧栏与分类页共用，必须先算）──
+  const bySeries = {}, byTag = {}
+  sets.forEach(s => {
+    if (s.series) (bySeries[s.series] = bySeries[s.series] || []).push(s)
+    s.tags.forEach(t => (byTag[t] = byTag[t] || []).push(s))
+  })
+
   // 详情页 + 资源
   let deployedThumbCount = 0
   sets.forEach((s, i) => {
     const outDir = join(DIST, 'set', s.slug)
     mkdirSync(outDir, { recursive: true })
-    writeFileSync(join(outDir, 'index.html'), detailPage(s, sets[i - 1], sets[i + 1], pageUrl(`set/${encodeURIComponent(s.slug)}/`), relatedSets(s, sets)))
+    writeFileSync(join(outDir, 'index.html'), detailPage(s, sets[i - 1], sets[i + 1], pageUrl(`set/${encodeURIComponent(s.slug)}/`), relatedSets(s, sets), byTag))
 
     // 预览图（原图；精简模式下不复制，改用缩略图作为大图）
     const imgOut = join(outDir, 'images')
@@ -1135,11 +1212,6 @@ function build() {
   })
 
   // ── 系列页 / 标签页（静态化，SEO 友好）──
-  const bySeries = {}, byTag = {}
-  sets.forEach(s => {
-    if (s.series) (bySeries[s.series] = bySeries[s.series] || []).push(s)
-    s.tags.forEach(t => (byTag[t] = byTag[t] || []).push(s))
-  })
   mkdirSync(join(DIST, 'series'), { recursive: true })
   mkdirSync(join(DIST, 'tag'), { recursive: true })
   // 标签/系列云（按图集数排序）：给每个标签页底部一份，方便访客横向浏览
