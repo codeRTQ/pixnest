@@ -703,9 +703,13 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
     </div>
     ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张${s.sizeText ? ` · 总大小 ${esc(s.sizeText)}` : ''}，以上为部分预览 · ${s.olDir ? `完整原图请到 <a href="${esc(s.olDir)}" target="_blank" rel="noopener">${esc(s.netdisk || 'OpenList')}</a> 查看` : (s.downloadUrl ? `完整图集请点上方下载按钮${s.netdisk ? `（${esc(s.netdisk)}）` : ''}` : '完整图集请下载压缩包')}</p>` : ''}`
     : '<p class="empty">暂无预览图</p>'
-  // 加载进度提示：原来在预览区下面，现在提到预览区上方（原来「预览图（8 / 32）」标题的位置）
+  // 这行是"本页预览图的加载进度"（本页只放 N 张预览，不是整套的张数），
+  // 所以分「加载中 / 已加载完」两种文案，避免 8/8 被误读成图集张数
   const streamHint = s.previews.length
-    ? `<p class="stream-hint top" id="streamHint">已加载 <span id="loadedCount">0</span> / ${s.previews.length} 张预览 · 滚动时自动加载 · <b>点击图片打开画廊</b>${s.olDir ? ' · 右上角「原图 ↗」直达原图' : ''}</p>`
+    ? `<p class="stream-hint top" id="streamHint" data-total="${s.previews.length}">`
+      + `<span id="hintLoading">正在加载本页预览 <span id="loadedCount">0</span> / ${s.previews.length} 张（向下滚动自动加载）</span>`
+      + `<span id="hintDone" hidden>✓ 本页 ${s.previews.length} 张预览已加载完${s.imageCount > s.previews.length ? `（本套共 ${s.imageCount} 张）` : ''}</span>`
+      + ` · <b>点击图片打开画廊</b>${s.olDir ? ' · 右上角「原图 ↗」直达原图' : ''}</p>`
     : ''
 
   // ── 右侧栏（参考同类站：下载 / 模特与系列 / 本套信息 / 热门标签）──
@@ -1363,6 +1367,17 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
 
     // 图片加载：懒加载 + WebP 失败回退 JPG；只负责显示，不再改变落位（避免布局抖动）
     let loadedN = 0;
+    const hintLoading = document.getElementById('hintLoading');
+    const hintDone = document.getElementById('hintDone');
+    const hintTotal = parseInt((document.getElementById('streamHint') || {}).dataset?.total || '0', 10) || items.length;
+    const syncHint = () => {
+      if (loadedCount) loadedCount.textContent = loadedN;
+      // 全部加载完就换成"已加载完"文案，避免 8 / 8 被误读成图集张数
+      if (hintLoading && hintDone && loadedN >= hintTotal) {
+        hintLoading.hidden = true;
+        hintDone.hidden = false;
+      }
+    };
     const loadOne = (el) => {
       if (el.dataset.done) return;
       el.dataset.done = '1';
@@ -1370,7 +1385,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       let tried = 0, counted = false;
       const done = () => {
         img.classList.add('loaded');
-        if (!counted) { counted = true; loadedN++; if (loadedCount) loadedCount.textContent = loadedN; }
+        if (!counted) { counted = true; loadedN++; syncHint(); }
       };
       const attempt = (src) => {
         const real = new Image();

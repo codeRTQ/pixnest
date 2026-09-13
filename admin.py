@@ -60,14 +60,31 @@ try:
 except Exception:  # noqa
     _SITE_CFG = {}
 SITE_VISION = (_SITE_CFG.get('vision') or {}) if isinstance(_SITE_CFG, dict) else {}
-VISION_BASE = os.environ.get('VISION_BASE') or SITE_VISION.get('base') or 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1'
-VISION_KEY = os.environ.get('VISION_API_KEY') or SITE_VISION.get('key') or ''
+# 项目内的 vision.json（已加入 .gitignore，专门放 key，不会被提交/推送）
+try:
+    _LOCAL_VISION = json.load(open(os.path.join(ROOT, 'vision.json'), encoding='utf-8'))
+except Exception:  # noqa
+    _LOCAL_VISION = {}
+if not isinstance(_LOCAL_VISION, dict):
+    _LOCAL_VISION = {}
+VISION_CFG = {**SITE_VISION, **_LOCAL_VISION}
+OVH_VISION_BASE = 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1'
+OVH_VISION_MODELS = ['Qwen2.5-VL-72B-Instruct', 'Qwen3.5-397B-A17B', 'Qwen3.6-27B',
+                     'Mistral-Small-3.2-24B-Instruct-2506', 'Qwen3.5-9B']
+VISION_BASE = os.environ.get('VISION_BASE') or VISION_CFG.get('base') or OVH_VISION_BASE
+VISION_KEY = os.environ.get('VISION_API_KEY') or VISION_CFG.get('key') or ''
 VISION_MODELS = ([m.strip() for m in os.environ['VISION_MODELS'].split(',') if m.strip()]
                  if os.environ.get('VISION_MODELS')
-                 else (SITE_VISION.get('models') or [
-                     'Qwen2.5-VL-72B-Instruct', 'Qwen3.5-397B-A17B', 'Qwen3.6-27B',
-                     'Mistral-Small-3.2-24B-Instruct-2506', 'Qwen3.5-9B',
-                 ]))
+                 else (VISION_CFG.get('models') or OVH_VISION_MODELS))
+
+
+def _vision_chain():
+    """打标用哪几家：配了自己的 key 就主用它，失败再回落 OVH 免费链"""
+    chain = [{'name': '自定义' if VISION_KEY else '默认', 'base': VISION_BASE,
+              'key': VISION_KEY, 'models': VISION_MODELS}]
+    if VISION_BASE != OVH_VISION_BASE:
+        chain.append({'name': 'OVH 免费', 'base': OVH_VISION_BASE, 'key': '', 'models': OVH_VISION_MODELS})
+    return chain
 VISION_PROMPT = (
     '你在为写真图集网站做内容标注。用户会给出同一套图集中的 1-3 张样图。\n'
     '请只输出一个 JSON 对象（不要任何解释、不要 markdown 代码块），格式：\n'
@@ -696,7 +713,25 @@ def _vision_payload_b64(path, max_w=768):
     return base64.b64encode(buf.getvalue()).decode()
 
 
+def _vision_text(data):
+    """从各家返回体里掏出正文：OpenAI 风格在 choices[0].message.content，
+    但有的模型会给 reasoning_content、有的把内容放在 choices[0].text，
+    偶尔还会返回空 content（限流/拒答）——这里统一兜住，并给出可诊断的错误。"""
+    try:
+        ch = (data.get('choices') or [{}])[0]
+    except Exception:  # noqa
+        ch = {}
+    msg = ch.get('message') or {}
+    for cand in (msg.get('content'), msg.get('reasoning_content'), ch.get('text'), msg.get('reasoning')):
+        if isinstance(cand, list):                       # 有些实现返回分段数组
+            cand = ''.join(str(x.get('text', x)) if isinstance(x, dict) else str(x) for x in cand)
+        if isinstance(cand, str) and cand.strip():
+            return cand
+    raise RuntimeError('模型返回里没有正文（%s）' % json.dumps(data, ensure_ascii=False)[:220])
+
+
 def _extract_json(text):
+    """把模型返回的正文解析成 dict：优先直接 JSON，其次从 ```json 块里抠，最后退化为关键词列表"""
     t = re.sub(r'^```(?:json)?|```$', '', (text or '').strip(), flags=re.M).strip()
     m = re.search(r'\{.*\}', t, re.S)
     if m:
@@ -708,14 +743,22 @@ def _extract_json(text):
     return {'tags': tags[:10], 'description': t[:80]}
 
 
+_vision_cooldown = {}          # 模型 → 冷却到期时间戳（被 429 后先别再去撞，省请求额度）
+
+
 def vision_analyze(paths, timeout=150):
-    """调用 OVH 免费匿名视觉链分析样图 → {tags, description, ...}；失败抛异常"""
+    """分析样图 → {tags, description, ...}；失败抛异常。
+    按 _vision_chain() 逐家逐模型试：自家 key 的接口优先，再回落 OVH 免费链。"""
     content = [{'type': 'text', 'text': VISION_PROMPT}]
     for p in paths[:3]:
         content.append({'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,' + _vision_payload_b64(p)}})
     last = 'unknown'
-    for model in VISION_MODELS:
-        for attempt in range(2):
+    now = time.time()
+    tried = []
+    for prov in _vision_chain():
+        base, key = prov['base'].rstrip('/'), prov['key']
+        usable = [m for m in prov['models'] if _vision_cooldown.get(base + '|' + m, 0) <= now] or prov['models']
+        for model in usable:
             try:
                 body = json.dumps({
                     'model': model,
@@ -723,25 +766,27 @@ def vision_analyze(paths, timeout=150):
                     'max_tokens': 700,
                     'temperature': 0.4,
                 }).encode('utf-8')
-                req = urllib.request.Request(
-                    VISION_BASE.rstrip('/') + '/chat/completions', data=body,
-                    headers={'Content-Type': 'application/json', 'User-Agent': 'img-site-admin'} if not VISION_KEY
-                    else {'Content-Type': 'application/json', 'User-Agent': 'img-site-admin',
-                          'Authorization': 'Bearer ' + VISION_KEY})
+                headers = {'Content-Type': 'application/json', 'User-Agent': 'img-site-admin'}
+                if key:
+                    headers['Authorization'] = 'Bearer ' + key
+                req = urllib.request.Request(base + '/chat/completions', data=body, headers=headers)
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     data = json.loads(resp.read().decode('utf-8'))
-                out = _extract_json(data['choices'][0]['message']['content'])
+                out = _extract_json(_vision_text(data))
                 out['_model'] = model
+                out['_provider'] = prov['name']
                 return out
             except urllib.error.HTTPError as e:
-                last = f'{model}: HTTP {e.code}'
-                if e.code == 429:
-                    time.sleep(2.5)
-                    continue
+                last = f'{prov["name"]}/{model}: HTTP {e.code}'
+                tried.append(last + ' ' + e.read().decode('utf-8', 'replace')[:100])
+                if e.code in (429, 402, 403):
+                    _vision_cooldown[base + '|' + model] = time.time() + 75
             except Exception as e:  # noqa
-                last = f'{model}: {e}'
-            time.sleep(0.8)
-    raise RuntimeError('视觉模型均不可用（' + last + '）')
+                last = f'{prov["name"]}/{model}: {e}'
+                tried.append(last)
+                log_line('error', f'打标 {prov["name"]}/{model} 失败：{type(e).__name__}: {e}')
+            time.sleep(0.5)
+    raise RuntimeError('视觉模型均不可用；' + ' | '.join(tried[-4:] or [last]))
 
 
 def autotag_set(set_dir, samples=3, make_description=True, force=False):
