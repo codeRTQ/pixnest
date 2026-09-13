@@ -197,24 +197,62 @@ def find_duplicate_sets(set_dir, exclude_slug=''):
     return hits
 
 
-def rebuild():
-    # 发布进行中禁止重建：deploy.py 正从 dist/ 读取上传，此时重建会换掉内容导致上传不一致
-    if _pub['running']:
-        return False, ('✗ 正在发布到线上（已用 %d 秒），请等发布完成后再重建站点。\n'
-                       '  发布过程中改动 dist/ 会导致上传内容新旧混杂。'
-                       % int(time.time() - _pub['started']))
-    env = dict(os.environ)
-    # 本地预览默认用精简模式：只拷缩略图（几百 MB、几秒），不拷几十 GB 原图
-    # 需要本地看原图时设 ADMIN_REBUILD=full
-    env['SITE_LITE'] = '1' if os.environ.get('ADMIN_REBUILD', 'lite') != 'full' else '0'
-    env['SITE_PUBLIC'] = '0'          # 本地预览保留 ?admin=1 入口
-    env.pop('SITE_BASE_URL', None)    # 本地不用线上域名
+def _dist_ok():
+    """产物体检：index.html 与 assets 必须存在且非空。
+    曾经的事故：构建中途被打断（或两个构建并发互删 dist）→ dist 里只剩 html 没有 assets，
+    访客看到的是完全没有样式的裸页面。"""
+    for rel in ('index.html', os.path.join('assets', 'style.css'), os.path.join('assets', 'app.js')):
+        fp = os.path.join(ROOT, 'dist', rel)
+        if not os.path.exists(fp) or os.path.getsize(fp) == 0:
+            return False, rel
+    return True, ''
+
+
+def _run_build(env):
     try:
         r = subprocess.run(['node', 'build.mjs'], cwd=ROOT, capture_output=True,
                            text=True, encoding='utf-8', errors='replace', timeout=900, env=env)
         return r.returncode == 0, ((r.stdout or '') + (r.stderr or '')).strip()
     except Exception as e:  # noqa
         return False, f'重建失败：{e}'
+
+
+_rebuild_lock = threading.Lock()
+
+
+def rebuild():
+    # 发布进行中禁止重建：deploy.py 正从 dist/ 读取上传，此时重建会换掉内容导致上传不一致
+    if _pub['running']:
+        return False, ('✗ 正在发布到线上（已用 %d 秒），请等发布完成后再重建站点。\n'
+                       '  发布过程中改动 dist/ 会导致上传内容新旧混杂。'
+                       % int(time.time() - _pub['started']))
+    # 串行化：后台是多线程的（ThreadingHTTPServer），两个动作连着点会并发构建，
+    # 各自 rmSync(dist) 再互相覆盖 → 产物变半成品（缺 assets 就是全站没样式）
+    if not _rebuild_lock.acquire(timeout=180):
+        return False, '✗ 等前一个构建等了 180 秒还没轮上，请稍后重试。'
+    try:
+        env = dict(os.environ)
+        # 本地预览默认用精简模式：只拷缩略图（几百 MB、几秒），不拷几十 GB 原图
+        # 需要本地看原图时设 ADMIN_REBUILD=full
+        env['SITE_LITE'] = '1' if os.environ.get('ADMIN_REBUILD', 'lite') != 'full' else '0'
+        env['SITE_PUBLIC'] = '0'          # 本地预览保留 ?admin=1 入口
+        env.pop('SITE_BASE_URL', None)    # 本地不用线上域名
+        ok, out = _run_build(env)
+        good, missing = _dist_ok()
+        if ok and not good:
+            out += f'\n! 产物缺少 {missing}，已自动重跑一次构建…'
+            ok, out2 = _run_build(env)
+            out += '\n' + out2
+            good, missing = _dist_ok()
+        if ok and not good:
+            ok = False
+            out += (f'\n× 产物仍缺少 {missing}：页面会没有样式/脚本。'
+                    '\n  排查方向：是否同时触发了两个构建、或构建进程被中途关掉？')
+        elif ok:
+            out += '\n✓ 产物体检通过（index.html + assets 齐全）'
+        return ok, out
+    finally:
+        _rebuild_lock.release()
 
 
 # ─────────────────── 一键发布到线上（Cloudflare Pages） ───────────────────

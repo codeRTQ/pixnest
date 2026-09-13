@@ -1247,9 +1247,57 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
 })();`
 
 // ─────────────────────────── 构建 ───────────────────────────
+/** 落盘样式与脚本（构建开头与结尾各调一次：开头这次保证"构建被打断也不会裸奔无样式"） */
+function writeAssets() {
+  mkdirSync(join(DIST, 'assets'), { recursive: true })
+  writeFileSync(join(DIST, 'assets', 'style.css'), STYLE)
+  writeFileSync(join(DIST, 'assets', 'app.js'), APP)
+  writeFileSync(join(DIST, 'assets', 'photoswipe-extra.css'), PSWP_EXTRA)
+  // PhotoSwipe（本地化，无 CDN 依赖）
+  const pswpSrc = join(ROOT, 'vendor', 'photoswipe')
+  if (existsSync(pswpSrc)) {
+    const pswpOut = join(DIST, 'assets', 'photoswipe')
+    mkdirSync(pswpOut, { recursive: true })
+    for (const f of readdirSync(pswpSrc)) {
+      const dst = join(pswpOut, f)
+      if (!existsSync(dst) || statSync(dst).size !== statSync(join(pswpSrc, f)).size) {
+        copyFileSync(join(pswpSrc, f), dst)
+      }
+    }
+  } else {
+    console.warn('! 未找到 vendor/photoswipe（画廊组件缺失，将回退为新窗口打开原图）')
+  }
+  return true
+}
+
+/**
+ * 清空 dist。Windows 上 rmSync 常因文件被杀软/索引器/预览服务器瞬时占用而
+ * 抛 ENOTEMPTY / EBUSY（删到一半失败），整个构建就崩了 —— 之前"改封面后样式全丢"
+ * 就是构建在半路挂掉留下的半成品。这里自带重试，仍失败则退化为"逐个删 + 继续构建"：
+ * 页面反正会全部重写，最坏情况只是残留几个已删除图集的旧文件，不影响访客看到的内容。
+ */
+function wipeDist() {
+  try {
+    rmSync(DIST, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 })
+    return
+  } catch (e) {
+    console.warn('! 清空 dist 失败（' + (e.code || e.message) + '），改为逐个删除后继续构建')
+  }
+  let left = 0
+  try {
+    for (const name of readdirSync(DIST)) {
+      const p = join(DIST, name)
+      try { rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }) }
+      catch { left++ }
+    }
+  } catch { /* dist 不存在等情况直接忽略 */ }
+  if (left) console.warn(`! 有 ${left} 项没能删掉（多半被占用），它们的旧文件会留着，但不影响本次构建结果`)
+  mkdirSync(DIST, { recursive: true })
+}
+
 function build() {
   if (!existsSync(SETS_DIR)) { console.error('× 找不到 sets/ 目录'); process.exit(1) }
-  rmSync(DIST, { recursive: true, force: true })
+  wipeDist()
   mkdirSync(join(DIST, 'assets'), { recursive: true })
   ASSET_V = createHash('sha1').update(STYLE + APP).digest('hex').slice(0, 8)
     + (config.assetSalt ? '-' + config.assetSalt : '')
@@ -1266,6 +1314,9 @@ function build() {
   const slugs = readdirSync(SETS_DIR).filter(name => statSync(join(SETS_DIR, name)).isDirectory())
   const sets = slugs.map(readSet).filter(Boolean).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
   if (!sets.length) console.warn('! sets/ 下没有有效图集（每个图集目录需含 meta.json）')
+  // ★ 先把样式/脚本落盘：后面复制缩略图要花几十秒，万一构建被打断（关掉后台、重启进程等），
+  //   至少页面还是有样式的。曾经的坑：assets 放在最后写，构建中途被杀 → 全站裸奔无 CSS。
+  writeAssets()
 
   // 列表页分页
   const per = config.setsPerPage
@@ -1427,19 +1478,8 @@ function build() {
   // 而 Pages 对 HTML 的默认行为正是 `max-age=0, must-revalidate`（带 ETag 协商缓存），
   // 对内容站恰好是最优解 —— 保持默认即可，上面那条规则仅为其他平台兼容而保留。
 
-  // 资源与索引
-  writeFileSync(join(DIST, 'assets', 'style.css'), STYLE)
-  writeFileSync(join(DIST, 'assets', 'app.js'), APP)
-  writeFileSync(join(DIST, 'assets', 'photoswipe-extra.css'), PSWP_EXTRA)
-  // PhotoSwipe（本地化，无 CDN 依赖）
-  const pswpSrc = join(ROOT, 'vendor', 'photoswipe')
-  if (existsSync(pswpSrc)) {
-    const pswpOut = join(DIST, 'assets', 'photoswipe')
-    mkdirSync(pswpOut, { recursive: true })
-    for (const f of readdirSync(pswpSrc)) copyFileSync(join(pswpSrc, f), join(pswpOut, f))
-  } else {
-    console.warn('! 未找到 vendor/photoswipe（画廊组件缺失，将回退为新窗口打开原图）')
-  }
+  // 资源与索引（CSS/JS 在构建开头就已写过一次，这里复写一次保证内容是最新的）
+  writeAssets()
   writeFileSync(join(DIST, 'search-index.json'), JSON.stringify({
     count: sets.length,
     generatedAt: new Date().toISOString(),

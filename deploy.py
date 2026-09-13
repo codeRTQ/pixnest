@@ -135,9 +135,15 @@ def check():
         print('  ✅ sitemap 使用绝对地址（分享卡片/SEO 正常）')
     else:
         print('  ⚠️ sitemap 为相对地址：部署后请设置 baseUrl（site.json 或 --base-url）再重新构建')
-    for need in ('404.html', '_headers', 'about.html'):
-        ok = os.path.exists(os.path.join(DIST, need))
+    # 关键产物：曾出现"dist 缺 assets → 线上全站没样式"，这里直接卡住不让发布
+    for need in ('404.html', '_headers', 'about.html', 'index.html',
+                 os.path.join('assets', 'style.css'), os.path.join('assets', 'app.js')):
+        p = os.path.join(DIST, need)
+        ok = os.path.exists(p) and os.path.getsize(p) > 0
         print(f'  {"✅" if ok else "❌"} {need}')
+        if not ok:
+            print('  ❌ 关键产物缺失，终止发布（先跑 node build.mjs 或后台「重新构建站点」）')
+            sys.exit(1)
 
 
 def bundle(make_tar=True):
