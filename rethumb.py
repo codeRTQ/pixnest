@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""重新生成缩略图（改了 admin.py 的 PREVIEW_W / 质量参数后跑一次）
+"""重新生成缩略图（改了 admin.py 的 PREVIEW_LONG / 质量参数后跑一次）
 
 用法：
     python rethumb.py                  # 对所有图集强制重生成缩略图 + LQIP + WebP
@@ -29,7 +29,7 @@ def main():
         only = args[i + 1] if i + 1 < len(args) else None
     do_cover = '--cover' in args
 
-    print(f'缩略图规格：宽 {admin.PREVIEW_W}px · JPEG q{admin.THUMB_Q} · WebP q{admin.WEBP_Q}'
+    print(f'缩略图规格：长边 {admin.PREVIEW_LONG}px · JPEG q{admin.THUMB_Q} · WebP q{admin.WEBP_Q}'
           f' · 封面 {admin.COVER_W}×{admin.COVER_H}')
     if only:
         print(f'只处理匹配「{only}」的图集')

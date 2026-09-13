@@ -33,7 +33,7 @@ from PIL import Image, ImageOps
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SETS_DIR = os.path.join(ROOT, 'sets')
 PORT = int(os.environ.get('ADMIN_PORT', '8091'))
-PREVIEW_W = 1920      # 详情页预览缩略图宽度（清晰度优先：1080p 屏整屏观看也不糊）
+PREVIEW_LONG = 1920   # 详情页预览缩略图【长边】上限（横竖构图总像素相近：竖 1280×1920 / 横 1920×1280）
 LQIP_W = 20           # 模糊占位图宽度
 COVER_W, COVER_H = 800, 1067   # 封面（列表卡片 2x 屏清晰）
 THUMB_Q = 88          # JPEG 质量
@@ -68,15 +68,24 @@ def slugify(s: str) -> str:
     return re.sub(r'-{2,}', '-', s).strip('-') or 'set'
 
 
-def make_thumb(src_bytes: bytes, dst: str, width: int, quality: int = THUMB_Q, box=None):
-    """等比缩放（或裁切到 box）并保存 JPEG，同时生成 LQIP 与可选 WebP 版本"""
+def make_thumb(src_bytes: bytes, dst: str, max_side: int, quality: int = THUMB_Q, box=None):
+    """生成缩略图。
+
+    · 不传 box：按【长边】等比缩放到 max_side —— 横竖构图总像素相近，且比例与原图完全一致
+      （竖构图 2:3 → 1280×1920；横构图 3:2 → 1920×1280；16:9 → 1920×1080 / 1080×1920）
+    · 传 box：居中裁切成固定尺寸（用于封面）
+    同时生成 LQIP 模糊占位图与可选 WebP 版本。
+    """
     im = ImageOps.exif_transpose(Image.open(BytesIO(src_bytes)))
     if box:
         out = ImageOps.fit(im.convert('RGB'), box, method=Image.LANCZOS, centering=(0.5, 0.4))
     else:
         out = im.convert('RGB')
-        if out.width > width:
-            out = out.resize((width, round(out.height * width / out.width)), Image.LANCZOS)
+        longest = max(out.width, out.height)
+        if longest > max_side:
+            scale = max_side / longest
+            out = out.resize((max(1, round(out.width * scale)), max(1, round(out.height * scale))),
+                             Image.LANCZOS)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     out.save(dst, 'JPEG', quality=quality, optimize=True, progressive=True)
     # LQIP：极小图，前端内联后先显示模糊版，再流式换成清晰图
@@ -110,7 +119,7 @@ def ensure_thumbs(set_dir: str, force=False):
                 or (WEBP_ENABLED and not os.path.exists(re.sub(r'\.jpg$', '.webp', dst))))
         if need:
             try:
-                make_thumb(open(os.path.join(img_dir, f), 'rb').read(), dst, PREVIEW_W)
+                make_thumb(open(os.path.join(img_dir, f), 'rb').read(), dst, PREVIEW_LONG)
                 n += 1
             except Exception as e:  # noqa
                 print(f'[admin] 缩略图失败 {f}: {e}')
@@ -702,7 +711,7 @@ def home_page(msg=''):
     sets = list_sets()
     body = f"""
 <h1>图集管理后台</h1>
-<p class="sub">上传 → 自动生成缩略图({PREVIEW_W}px)+模糊占位图 → 写入 sets/ → 重建静态站 · 端口 {PORT}</p>
+<p class="sub">上传 → 自动生成缩略图(长边 {PREVIEW_LONG}px)+模糊占位图 → 写入 sets/ → 重建静态站 · 端口 {PORT}</p>
 <form class="panel" id="f" method="post" action="/upload" enctype="multipart/form-data">
   <h2>① 新建图集</h2>
   <div class="grid2">
@@ -720,7 +729,7 @@ def home_page(msg=''):
   </div>
   <div><label style="margin-top:12px">描述（可选）</label><textarea name="description" rows="2"></textarea></div>
   <div class="drop" id="drop"><div><strong>拖拽图片/文件夹到这里</strong> 或 <strong>点击选择图片</strong>（可多选）</div>
-    <div style="font-size:12px;margin-top:6px">缩略图 {PREVIEW_W}px 自动生成 · 封面自动 {COVER_W}×{COVER_H} 裁切</div>
+    <div style="font-size:12px;margin-top:6px">缩略图 {PREVIEW_LONG}px 自动生成 · 封面自动 {COVER_W}×{COVER_H} 裁切</div>
     <input type="file" id="imgs" name="images" accept="image/*" multiple hidden></div>
   <div class="row"><button type="button" class="btn ghost sm" id="pickFolder">📁 选择整个文件夹导入</button>
     <span class="sub" style="margin:0">按文件名排序（00001→00041）· 自动用文件夹名填标题</span>
@@ -1513,7 +1522,7 @@ class Handler(BaseHTTPRequestHandler):
             name = base + ('.jpg' if ext in ('.jpg', '.jpeg') else ext)
             try:
                 open(os.path.join(img_dir, name), 'wb').write(raw)
-                make_thumb(raw, os.path.join(thumb_dir, base + '.jpg'), PREVIEW_W)
+                make_thumb(raw, os.path.join(thumb_dir, base + '.jpg'), PREVIEW_LONG)
                 existing[h] = name
                 saved.append(name)
             except Exception as e:  # noqa
@@ -1605,7 +1614,7 @@ class Handler(BaseHTTPRequestHandler):
                 base = f'{start + added + 1:02d}'
                 name = base + ('.jpg' if ext in ('.jpg', '.jpeg') else ext)
                 open(os.path.join(set_dir, 'images', name), 'wb').write(raw)
-                make_thumb(raw, os.path.join(set_dir, 'thumbs', base + '.jpg'), PREVIEW_W)
+                make_thumb(raw, os.path.join(set_dir, 'thumbs', base + '.jpg'), PREVIEW_LONG)
                 existing[h] = name
                 added += 1
 
