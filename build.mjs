@@ -119,6 +119,12 @@ function fileVer(p) {
 }
 const verQ = (v) => (v ? '?v=' + v : '')
 
+/** 「最新发布」的排序比较：日期 → 入库时间 → 目录名（都倒序）。
+ *  只比日期是不够的：同一天导入的一批图集，刚上传的会排不到最前面。 */
+const cmpDateDesc = (a, b) => String(b.date || '').localeCompare(String(a.date || ''))
+  || String(b.addedAt || '').localeCompare(String(a.addedAt || ''))
+  || String(b.slug || '').localeCompare(String(a.slug || ''))
+
 /** 读取图片文件头取宽高（零依赖，只读前 64KB） */
 function imageSize(path) {
   try {
@@ -249,6 +255,8 @@ function readSet(slug) {
   }
 
   const date = meta.date || new Date(statSync(metaPath).mtime).toISOString().slice(0, 10)
+  // 入库时间：同一天发布的图集很多，"最新发布"需要次级排序才能把刚上传的排到最前
+  const addedAt = meta.addedAt || new Date(statSync(metaPath).mtime).toISOString().slice(0, 19)
   const series = meta.series || ''
   const model = meta.model || ''
   const rawTitle = meta.title || slug
@@ -273,6 +281,7 @@ function readSet(slug) {
     series,
     model,
     date,
+    addedAt,
     tags: meta.tags || [],
     description: meta.description || '',
     password: meta.password || '',
@@ -1217,8 +1226,12 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       const applySort = (list) => {
         const v = sortSel ? sortSel.value : 'date-desc';
         const arr = list.slice();
-        if (v === 'date-desc') arr.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-        else if (v === 'date-asc') arr.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        if (v === 'date-desc') arr.sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))
+          || String(b.addedAt || '').localeCompare(String(a.addedAt || ''))
+          || String(b.slug || '').localeCompare(String(a.slug || '')));
+        else if (v === 'date-asc') arr.sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))
+          || String(a.addedAt || '').localeCompare(String(b.addedAt || ''))
+          || String(a.slug || '').localeCompare(String(b.slug || '')));
         else if (v === 'count-desc') arr.sort((a, b) => (b.imageCount || 0) - (a.imageCount || 0));
         else if (v === 'size-desc') arr.sort((a, b) => (b.bytes || 0) - (a.bytes || 0));
         else if (v === 'title-asc') arr.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'zh-CN'));
@@ -1594,7 +1607,8 @@ function build() {
   }
 
   const slugs = readdirSync(SETS_DIR).filter(name => statSync(join(SETS_DIR, name)).isDirectory())
-  const sets = slugs.map(readSet).filter(Boolean).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  const sets = slugs.map(readSet).filter(Boolean)
+    .sort((a, b) => cmpDateDesc(a, b))
   if (!sets.length) console.warn('! sets/ 下没有有效图集（每个图集目录需含 meta.json）')
   // ★ 先把样式/脚本落盘：后面复制缩略图要花几十秒，万一构建被打断（关掉后台、重启进程等），
   //   至少页面还是有样式的。曾经的坑：assets 放在最后写，构建中途被杀 → 全站裸奔无 CSS。
@@ -1783,7 +1797,7 @@ function build() {
     generatedAt: new Date().toISOString(),
     sets: sets.map(s => ({
       slug: s.slug, title: s.title, displayTitle: s.displayTitle,
-      series: s.series, model: s.model, date: s.date, tags: s.tags,
+      series: s.series, model: s.model, date: s.date, addedAt: s.addedAt, tags: s.tags,
       imageCount: s.imageCount, packSize: s.packSize, size: s.sizeText, bytes: s.bytes,
       cover: s.coverThumb ? `set/${s.slug}/thumbs/${s.coverThumb}${verQ(s.thumbVer[s.coverThumb])}` : (s.coverFile ? `set/${s.slug}/${s.coverFile}` : ''),
     })),

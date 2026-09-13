@@ -26,7 +26,7 @@ import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from urllib.parse import urlparse, quote
@@ -2915,6 +2915,8 @@ class Handler(BaseHTTPRequestHandler):
 
         all_imgs = set_images(set_dir)
         meta = read_meta(set_dir)
+        # 记录入库时间：同一天发布的图集很多，"最新发布"要能按上传先后排（否则新传的排不到最前）
+        meta.setdefault('addedAt', datetime.now().isoformat(timespec='seconds'))
         meta.update({
             'title': title, 'series': g('series'), 'date': d, 'model': g('model'),
             'tags': [t.strip() for t in re.split(r'[,，]', g('tags')) if t.strip()],
