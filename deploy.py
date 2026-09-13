@@ -392,7 +392,7 @@ def verify_deploy(project, deployment_id, base_url=None):
             print(f'  ⚠️ 访问自定义域失败：{e}')
 
 
-def cloudflare(project='img-site', branch='main'):
+def cloudflare(project='img-site', branch='main', base_url=None):
     if shutil.which('wrangler') is None and shutil.which('npx') is None:
         sys.exit('× 未找到 wrangler / npx，请先 npm i -g wrangler && wrangler login')
     print(f'\n=== 4/4 部署到 Cloudflare Pages（项目 {project}）===')
@@ -412,7 +412,7 @@ def cloudflare(project='img-site', branch='main'):
     print(f'\n访问地址：https://{project}.pages.dev/')
     print('自定义域：Cloudflare 控制台 → Pages → 该项目 → Custom domains 添加你的域名')
     if m:
-        verify_deploy(project, m.group(1), BASE_URL or None)
+        verify_deploy(project, m.group(1), (base_url or BASE_URL or '').rstrip('/') or None)
     else:
         print('  ⚠️ 没能从 wrangler 输出里解析出部署地址，跳过发布校验')
 
@@ -453,7 +453,7 @@ def main():
     if a.oss:
         oss_upload()
     elif a.cloudflare:
-        cloudflare(a.project, a.branch)
+        cloudflare(a.project, a.branch, a.base_url)
     elif a.sftp:
         sftp(a.sftp)
     else:
