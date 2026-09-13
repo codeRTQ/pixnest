@@ -1160,14 +1160,30 @@ function renameTag(btn){
   toast('正在重命名并重建站点，请稍候…');
   post('/tagmerge',{from:[from],to},'/tags');
 }
-function delTag(btn){const t=btn.dataset.tag;if(!confirm('从全站删除标签「'+t+'」？'))return;toast('正在处理…');post('/tagmerge',{from:[t],to:''},'/tags')}
+function delTag(btn){
+  const t=btn.dataset.tag;
+  if(btn.dataset.armed!=='1'){
+    btn.dataset.armed='1';btn.textContent='确认删除';
+    toast('再点一次确认：从全站删除标签「'+t+'」');
+    setTimeout(()=>{if(btn.dataset.armed==='1'){btn.dataset.armed='0';btn.textContent='全站删除'}},5000);
+    return;
+  }
+  toast('正在删除并重建站点…');post('/tagmerge',{from:[t],to:''},'/tags');
+}
 function mergeGroup(btn){
   const sel=btn.parentElement.querySelector('.mergeto');
   const to=sel.value;
   const group=[...btn.closest('.taggroup').querySelectorAll('.chip')].map(c=>c.dataset.tag||c.textContent.trim());
   const from=group.filter(t=>t!==to);
   if(!from.length){toast('这一组只有一个标签，无需合并',false);return}
-  if(!confirm('把 '+'、'.join(from)+' 合并进「'+to+'」？\\n\\n合并后这些旧标签会从全站图集移除，并替换为「'+to+'」。'))return;
+  // 两步确认：不依赖浏览器 confirm 弹窗（弹窗被拦截时会静默失败，点了像没反应）
+  if(btn.dataset.armed!=='1'){
+    btn.dataset.armed='1';btn.textContent='确认合并';btn.classList.add('danger');
+    toast('再点一次确认：把 '+from.join('、')+' 合并进「'+to+'」');
+    setTimeout(()=>{if(btn.dataset.armed==='1'){btn.dataset.armed='0';btn.textContent='合并';btn.classList.remove('danger')}},5000);
+    return;
+  }
+  btn.dataset.armed='0';btn.textContent='合并';btn.classList.remove('danger');
   toast('正在合并并重建站点，请稍候…');
   post('/tagmerge',{from,to},'/tags');
 }
