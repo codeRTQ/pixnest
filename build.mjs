@@ -400,6 +400,7 @@ ${ADULT_GATE}
     </div>
     <button class="icon-btn" id="randomBtn" title="随便看看">🎲</button>
     <button class="icon-btn" id="themeBtn" title="切换深浅色">🌗</button>
+    <a class="icon-btn" href="${rel}models.html" title="模特列表">👤</a>
     <a class="icon-btn" href="${rel}collections.html" title="系列与标签">☰</a>
   </div>
   ${nav}
@@ -409,6 +410,7 @@ ${ADULT_GATE}
   <div class="wrap">
     <p>${esc(config.siteName)} · 静态生成 · 共 <span id="set-total"></span> 套图</p>
     <p class="foot-links">
+      <a href="${rel}models.html">模特</a>
       <a href="${rel}collections.html">系列与标签</a>
       <a href="${rel}about.html">免责声明</a>
       ${config.privacy ? `<a href="${rel}privacy.html">隐私政策</a>` : ''}
@@ -441,6 +443,39 @@ const card = (s, rel = '') => `
   </div>
 </article>`
 
+/**
+ * 分页组件：沿用 Bootstrap 5 分页的规范（.pagination / .page-item / .page-link / .active / .disabled）
+ * —— 成熟的交互规范：首页/上一页 + 页码窗口 + 省略号 + 下一页/末页，当前页高亮。
+ * 静态站里这些是真实 <a> 链接（可被爬虫跟、可新窗口打开），不需要任何 JS 运行时。
+ */
+function pagerHtml(page, totalPages, hrefOf) {
+  if (totalPages <= 1) return ''
+  const WINDOW = 2                     // 当前页左右各显示 2 页
+  const nums = new Set([1, totalPages])
+  for (let p = page - WINDOW; p <= page + WINDOW; p++) if (p >= 1 && p <= totalPages) nums.add(p)
+  const list = [...nums].sort((a, b) => a - b)
+  const item = (inner, extra = '') => `<li class="page-item${extra ? ' ' + extra : ''}">${inner}</li>`
+  const link = (p, label, aria = '') => item(`<a class="page-link" href="${hrefOf(p)}"${aria}>${label}</a>`)
+  const dead = (label) => item(`<span class="page-link">${label}</span>`, 'disabled')
+  const out = []
+  out.push(page > 1 ? link(1, '« <span class="pg-word">首页</span>') : dead('« <span class="pg-word">首页</span>'))
+  out.push(page > 1 ? link(page - 1, '‹ <span class="pg-word">上一页</span>') : dead('‹ <span class="pg-word">上一页</span>'))
+  let prev = 0
+  for (const p of list) {
+    if (prev && p - prev > 1) out.push(item('<span class="page-link">…</span>', 'disabled'))
+    out.push(p === page
+      ? item(`<span class="page-link" aria-current="page">${p}</span>`, 'active')
+      : link(p, String(p)))
+    prev = p
+  }
+  out.push(page < totalPages ? link(page + 1, '<span class="pg-word">下一页</span> ›') : dead('<span class="pg-word">下一页</span> ›'))
+  out.push(page < totalPages ? link(totalPages, '<span class="pg-word">末页</span> »') : dead('<span class="pg-word">末页</span> »'))
+  return `<nav class="pagination-wrap static-pager" aria-label="分页导航">
+    <ul class="pagination">${out.join('')}</ul>
+    <p class="pagination-info">第 ${page} / ${totalPages} 页</p>
+  </nav>`
+}
+
 function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets = null) {
   // 站内总张数与总体量（整站口径，跟分页无关）
   const siteList = allSets || sets
@@ -462,11 +497,8 @@ function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets
   </div>
   <div class="grid" id="grid">${sets.map(s => card(s, rel)).join('')}</div>
   <p class="empty" id="empty" hidden>没有匹配的图集</p>
-  ${totalPages > 1 ? `<nav class="pager">
-    ${page > 1 ? `<a href="${rel}${page === 2 ? 'index.html' : `page/${page - 1}.html`}">← 上一页</a>` : '<span class="dim">← 上一页</span>'}
-    <span class="pager-now">${page} / ${totalPages}</span>
-    ${page < totalPages ? `<a href="${rel}page/${page + 1}.html">下一页 →</a>` : '<span class="dim">下一页 →</span>'}
-  </nav>` : ''}
+  <div id="clientPager"></div>
+  ${pagerHtml(page, totalPages, p => rel + (p === 1 ? 'index.html' : `page/${p}.html`))}
   <button class="to-top" id="toTop" hidden title="回到顶部">↑</button>`
   return layout({
     title: page === 1 ? `${config.siteName} · ${config.siteSubtitle}` : `${config.siteName} · 第 ${page} 页`,
@@ -478,48 +510,164 @@ function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets
   })
 }
 
-function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}, moreSets = [], modelTotal = 0) {
-  const rel = '../../'
-  // 模特资料：仅展示填写过的字段（AI 不会生成这些）
-  const pf = s.profile || {}
-  // 社交账号单独渲染成可点链接（微博/抖音等平台按关键词搜索，避免写错主页地址）
-  const pfSocial = { weibo: '微博', douyin: '抖音', x: 'X', ins: 'Instagram', bilibili: 'B站', xhs: '小红书' }
-  const socialUrl = (k, v) => {
-    const clean = String(v).replace(/^@/, '')
-    return {
-      weibo: 'https://s.weibo.com/weibo?q=' + encodeURIComponent(clean),
-      douyin: 'https://www.douyin.com/search/' + encodeURIComponent(clean),
-      bilibili: 'https://search.bilibili.com/all?keyword=' + encodeURIComponent(clean),
-      xhs: 'https://www.xiaohongshu.com/search_result?keyword=' + encodeURIComponent(clean),
-      x: 'https://x.com/search?q=' + encodeURIComponent(clean),
-      ins: 'https://www.instagram.com/' + encodeURIComponent(clean),
-    }[k] || ''
-  }
-  // 模特资料：渲染成一段引文式文字（不堆卡片，可读性更好）
-  // 顺序：出生 → 星座 → 常驻 → 身高/体重/三围/鞋码 → 风格 → 其他；labels 为空的字段本身已说明含义，不加前缀
-  const pfOrder = [
-    ['birth', '出生'], ['sign', ''], ['city', ''],
-    ['height', '身高'], ['weight', '体重'], ['measure', '三围'], ['shoes', '鞋码'],
-    ['style', ''], ['other', ''],
-  ]
-  const pfParts = []
-  pfOrder.forEach(([k, label]) => {
+// ── 模特资料渲染（详情页侧栏与模特页共用）──
+// 顺序：出生 → 星座 → 常驻 → 身高/体重/三围/鞋码 → 风格 → 其他；label 为空的字段本身已说明含义
+const PF_ORDER = [
+  ['birth', '出生'], ['sign', ''], ['city', ''],
+  ['height', '身高'], ['weight', '体重'], ['measure', '三围'], ['shoes', '鞋码'],
+  ['style', ''], ['other', ''],
+]
+const PF_SOCIAL = { weibo: '微博', douyin: '抖音', x: 'X', ins: 'Instagram', bilibili: 'B站', xhs: '小红书' }
+// 社交账号按关键词搜索，避免写错主页地址
+const socialUrl = (k, v) => {
+  const clean = String(v).replace(/^@/, '')
+  return {
+    weibo: 'https://s.weibo.com/weibo?q=' + encodeURIComponent(clean),
+    douyin: 'https://www.douyin.com/search/' + encodeURIComponent(clean),
+    bilibili: 'https://search.bilibili.com/all?keyword=' + encodeURIComponent(clean),
+    xhs: 'https://www.xiaohongshu.com/search_result?keyword=' + encodeURIComponent(clean),
+    x: 'https://x.com/search?q=' + encodeURIComponent(clean),
+    ins: 'https://www.instagram.com/' + encodeURIComponent(clean),
+  }[k] || ''
+}
+/** 模特资料 → 一段引文式 HTML（没填任何字段就返回空串） */
+function profileQuoteHtml(pf = {}, extraClass = '') {
+  const parts = []
+  PF_ORDER.forEach(([k, label]) => {
     if (!pf[k]) return
     const v = String(pf[k]).trim()
-    if (!label) { pfParts.push(v); return }
+    if (!label) { parts.push(esc(v)); return }
     // 「1998 年」→「1998 年出生」读起来更顺
-    pfParts.push(k === 'birth' && /^\d{4}\s*年?$/.test(v) ? v.replace(/\s*年?$/, ' 年出生') : `${label} ${v}`)
+    parts.push(k === 'birth' && /^\d{4}\s*年?$/.test(v) ? esc(v.replace(/\s*年?$/, ' 年出生')) : esc(`${label} ${v}`))
   })
-  const pfSocialItems = Object.keys(pfSocial).filter(k => pf[k]).map(k => {
+  const socials = Object.keys(PF_SOCIAL).filter(k => pf[k]).map(k => {
     const v = String(pf[k])
     const u = socialUrl(k, v)
-    return `${pfSocial[k]} ${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}`
+    return `${PF_SOCIAL[k]} ${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}`
   })
-  const pfText = pfParts.join(' · ')
-  // 模特资料引文：搬到右侧栏「👤 模特与系列」里（原来是放在正文顶部）
-  const profileBlock = (pfText || pfSocialItems.length)
-    ? `<blockquote class="pf-quote side-quote">${pfText ? `<p>${esc(pfText)}</p>` : ''}${pfSocialItems.length ? `<p class="pf-social">${pfSocialItems.join(' · ')}</p>` : ''}</blockquote>`
-    : ''
+  if (!parts.length && !socials.length) return ''
+  return `<blockquote class="pf-quote${extraClass ? ' ' + extraClass : ''}">`
+    + (parts.length ? `<p>${parts.join(' · ')}</p>` : '')
+    + (socials.length ? `<p class="pf-social">${socials.join(' · ')}</p>` : '')
+    + '</blockquote>'
+}
+
+/** 单个模特的页面：资料引文 + 该模特的全部图集（按系列分组时给出系列芯片）*/
+function modelPage(name, list, rel = '../') {
+  const pf = modelProfile(name)
+  const bytes = list.reduce((n, s) => n + (s.bytes || 0), 0)
+  const imgs = list.reduce((n, s) => n + (s.imageCount || 0), 0)
+  const latest = list.map(s => s.date || '').sort().pop() || ''
+  const seriesList = [...new Set(list.map(s => s.series).filter(Boolean))]
+  const body = `
+  <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}models.html">模特</a><span>/</span><span class="cur">${esc(name)}</span></nav>
+  <div class="page-head">
+    <h1>👤 ${esc(name)}</h1>
+    <p class="sub">共 ${list.length} 套图集 · ${imgs} 张${bytes ? ` · 合计 <b class="size-strong">${esc(fmtSize(bytes))}</b>` : ''}${latest ? ` · 最新 ${esc(latest)}` : ''}</p>
+  </div>
+  ${profileQuoteHtml(pf)}
+  ${seriesList.length ? `<div class="chips-cloud" style="margin:0 0 18px">${seriesList.map(n =>
+    `<a class="cloud-chip" href="${rel}series/${encodeURIComponent(n)}.html">${esc(n)}<span>${list.filter(s => s.series === n).length}</span></a>`).join('')}</div>` : ''}
+  <div class="grid">${list.map(s => card(s, rel)).join('')}</div>
+  <p class="more-hint"><a href="${rel}models.html" class="dim">← 全部模特</a></p>`
+  const url = pageUrl(`model/${encodeURIComponent(name)}.html`)
+  return layout({
+    title: `${name} 的全部作品（${list.length} 套） - ${config.siteName}`,
+    desc: `${name} 的图集合集，共 ${list.length} 套${imgs ? `、${imgs} 张` : ''}${bytes ? `、合计 ${fmtSize(bytes)}` : ''}。`,
+    body, rel, canonical: url,
+    og: { type: 'profile', url },
+    jsonld: `<script type="application/ld+json">${JSON.stringify({
+      '@context': 'https://schema.org', '@type': 'CollectionPage', name: `${name} 的全部作品`,
+      url, numberOfItems: list.length, about: { '@type': 'Person', name },
+    })}</script>`,
+  })
+}
+
+/** 模特列表页（类似同类站的 /cosers）：每位模特一张卡，点进去是该模特的独立页 */
+function modelsIndexPage(byModel, allSets) {
+  const entries = Object.entries(byModel).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], 'zh-CN'))
+  const bytes = allSets.reduce((n, s) => n + (s.bytes || 0), 0)
+  const cards = entries.map(([name, list]) => {
+    const pf = modelProfile(name)
+    const latest = list.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0]
+    const b = list.reduce((n, s) => n + (s.bytes || 0), 0)
+    const chips = [pf.height, pf.style, pf.city].filter(Boolean).slice(0, 2)
+      .map(v => `<span class="tag">${esc(v)}</span>`).join('')
+    return `<article class="card">
+    <a class="card-link" href="model/${encodeURIComponent(name)}.html">
+      <div class="card-cover">
+        ${latest && latest.coverFile
+          ? `<img loading="lazy" src="set/${latest.slug}/${latest.coverThumb ? 'thumbs/' + latest.coverThumb + verQ(latest.thumbVer[latest.coverThumb]) : latest.coverFile}" alt="${esc(name)}">`
+          : '<div class="no-cover">无封面</div>'}
+        <span class="badge">${list.length} 套</span>
+        ${b ? `<span class="badge badge-size">${esc(fmtSize(b))}</span>` : ''}
+      </div>
+      <h2 class="card-title">👤 ${esc(name)}</h2>
+    </a>
+    <div class="card-meta">
+      ${chips}
+      <time datetime="${esc(latest ? latest.date : '')}">${pf.birth ? esc(pf.birth) + ' · ' : ''}最新 ${esc(latest ? latest.date : '')}</time>
+    </div>
+  </article>`
+  }).join('')
+  const body = `
+  <div class="page-head">
+    <h1>模特</h1>
+    <p class="sub">共 ${entries.length} 位模特 · ${allSets.length} 套图集 · ${allSets.reduce((n, s) => n + (s.imageCount || 0), 0)} 张${bytes ? ` · 合计 <b class="size-strong">${esc(fmtSize(bytes))}</b>` : ''}</p>
+  </div>
+  <div class="grid">${cards}</div>
+  <p class="more-hint"><a href="collections.html" class="dim">按系列与标签浏览 →</a></p>`
+  return layout({
+    title: `模特列表 - ${config.siteName}`,
+    desc: `${config.siteName} 收录的全部模特，共 ${entries.length} 位、${allSets.length} 套图集。`,
+    body, rel: '', canonical: pageUrl('models.html'),
+    og: { type: 'website', url: pageUrl('models.html') },
+  })
+}
+
+/** 系列列表页（有系列时才生成）：每个系列一张卡 */
+function seriesIndexPage(bySeries, allSets) {
+  const entries = Object.entries(bySeries).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], 'zh-CN'))
+  const cards = entries.map(([name, list]) => {
+    const latest = list.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0]
+    const b = list.reduce((n, s) => n + (s.bytes || 0), 0)
+    const models = [...new Set(list.map(s => s.model).filter(Boolean))]
+    return `<article class="card">
+    <a class="card-link" href="series/${encodeURIComponent(name)}.html">
+      <div class="card-cover">
+        ${latest && latest.coverFile
+          ? `<img loading="lazy" src="set/${latest.slug}/${latest.coverThumb ? 'thumbs/' + latest.coverThumb + verQ(latest.thumbVer[latest.coverThumb]) : latest.coverFile}" alt="${esc(name)}">`
+          : '<div class="no-cover">无封面</div>'}
+        <span class="badge">${list.length} 套</span>
+        ${b ? `<span class="badge badge-size">${esc(fmtSize(b))}</span>` : ''}
+      </div>
+      <h2 class="card-title">${esc(name)}</h2>
+    </a>
+    <div class="card-meta">
+      ${models.slice(0, 2).map(m => `<span class="tag tag-model">${esc(m)}</span>`).join('')}
+      <time datetime="${esc(latest ? latest.date : '')}">最新 ${esc(latest ? latest.date : '')}</time>
+    </div>
+  </article>`
+  }).join('')
+  const body = `
+  <div class="page-head">
+    <h1>系列</h1>
+    <p class="sub">共 ${entries.length} 个系列 · ${entries.reduce((n, [, l]) => n + l.length, 0)} 套图集</p>
+  </div>
+  <div class="grid">${cards}</div>
+  <p class="more-hint"><a href="models.html" class="dim">按模特浏览 →</a> · <a href="collections.html" class="dim">全部标签 →</a></p>`
+  return layout({
+    title: `系列列表 - ${config.siteName}`,
+    desc: `${config.siteName} 的全部系列，共 ${entries.length} 个。`,
+    body, rel: '', canonical: pageUrl('series.html'),
+    og: { type: 'website', url: pageUrl('series.html') },
+  })
+}
+
+function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}, moreSets = [], modelTotal = 0) {
+  const rel = '../../'
+  // 模特资料引文（搬到右侧栏「👤 模特与系列」里展示）
+  const profileBlock = profileQuoteHtml(s.profile || {}, 'side-quote')
 
   const previews = s.previews.length
     ? `<div class="previews" id="gallery">
@@ -591,7 +739,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
       ${profileBlock
         ? `<p class="side-sub first">模特信息${s.model ? `<span class="dim"> · ${esc(s.model)}</span>` : ''}</p>${profileBlock}`
         : `<div class="side-links">
-        ${s.model ? `<a class="side-link" href="${rel}index.html?q=${encodeURIComponent(s.model)}">${esc(s.model)} <span class="dim">的全部作品${modelTotal > 1 ? `（${modelTotal} 套）` : ''}</span></a>` : ''}
+        ${s.model ? `<a class="side-link" href="${rel}model/${encodeURIComponent(s.model)}.html">${esc(s.model)} <span class="dim">的全部作品${modelTotal > 1 ? `（${modelTotal} 套）` : ''}</span></a>` : ''}
       </div>`}
       ${s.series ? `<div class="side-links"><a class="side-link" href="${rel}series/${encodeURIComponent(s.series)}.html">${esc(s.series)} <span class="dim">系列全部</span></a></div>` : ''}
       ${moreSets.length ? `<div class="side-sets">
@@ -605,7 +753,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
             <span class="ss-meta">${esc(x.date)} · ${x.imageCount}P${x.sizeText ? ' · ' + esc(x.sizeText) : (x.packSize ? ' · ' + esc(x.packSize) : '')}</span>
           </span>
         </a>`).join('')}
-        ${modelTotal > moreSets.length + 1 ? `<a class="side-more" href="${rel}index.html?q=${encodeURIComponent(s.model || '')}">查看全部 ${modelTotal} 套 →</a>` : ''}
+        ${modelTotal > moreSets.length + 1 ? `<a class="side-more" href="${rel}model/${encodeURIComponent(s.model || '')}.html">查看全部 ${modelTotal} 套 →</a>` : ''}
       </div>` : ''}
     </section>` : ''}
     <section class="side-box">
@@ -641,7 +789,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
     <div class="detail-meta">
       ${s.sizeText ? `<span class="tag tag-size" title="这套图原图总大小（${s.imageCount} 张）">📦 ${esc(s.sizeText)}</span>` : ''}
       ${s.series ? `<a class="tag tag-series" href="${rel}series/${encodeURIComponent(s.series)}.html" title="查看该系列全部图集">${esc(s.series)}</a>` : ''}
-      ${s.model ? `<a class="tag tag-model" href="${rel}index.html?q=${encodeURIComponent(s.model)}" title="查看该模特全部图集">模特：${esc(s.model)}</a>` : ''}
+      ${s.model ? `<a class="tag tag-model" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看该模特的独立页面">模特：${esc(s.model)}</a>` : ''}
       ${s.tags.map(t => `<a class="tag tag-link" href="${rel}tag/${encodeURIComponent(t)}.html" title="查看同标签图集">#${esc(t)}</a>`).join('')}
     </div>
     ${s.description ? `<p class="detail-desc">${esc(s.description)}</p>` : ''}
@@ -754,8 +902,21 @@ img{max-width:100%;display:block}
 .to-top{position:fixed;right:22px;bottom:26px;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);
   background:var(--panel);color:var(--fg);font-size:18px;cursor:pointer;z-index:30;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .to-top:hover{border-color:var(--accent)}
-.pager a{padding:8px 16px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
-.pager a:hover{border-color:var(--accent)}
+/* 分页组件（Bootstrap 5 分页规范：.pagination/.page-item/.page-link/.active/.disabled） */
+.pagination-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;margin:30px 0 10px}
+.pagination-wrap[hidden]{display:none}   /* CSS 的 display 会盖掉 hidden 属性，必须显式声明 */
+.pagination{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0;padding:0;justify-content:center}
+.pagination .page-link{display:block;min-width:38px;text-align:center;padding:7px 11px;border:1px solid var(--line);
+  border-radius:8px;background:var(--panel);color:var(--fg);text-decoration:none;font-size:13px;line-height:1.25;transition:.15s}
+.pagination .page-item:not(.disabled):not(.active) .page-link:hover{border-color:var(--accent);color:var(--accent)}
+.pagination .page-item.active .page-link{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;cursor:default}
+.pagination .page-item.disabled .page-link{opacity:.45;cursor:not-allowed}
+.pagination-info{color:var(--dim);font-size:12.5px;margin:0}
+@media (max-width:560px){
+  .pagination{gap:4px}
+  .pagination .page-link{min-width:32px;padding:6px 8px;font-size:12.5px}
+  .pagination .page-link .pg-word{display:none}   /* 窄屏只留箭头与页码 */
+}
 .dim{color:var(--dim)}
 .empty{text-align:center;color:var(--dim);padding:40px 0}
 .breadcrumb{display:flex;gap:8px;color:var(--dim);font-size:13px;margin:22px 0 14px;flex-wrap:wrap}
@@ -998,20 +1159,46 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       const hay = [s.title, s.series, s.model, (s.tags || []).join(' '), s.date].join(' ').toLowerCase();
       return q.split(/\\s+/).filter(Boolean).every(part => hay.includes(part));
     };
+    // 客户端分页所需的状态与渲染器（必须与 renderList 同作用域，否则 renderList 里引用不到）
+    const clientPager = document.getElementById('clientPager');
+    let curPage = 1;
+    const clientPagerHtml = (pages) => {
+      const w = 2, nums = new Set([1, pages]);
+      for (let p = curPage - w; p <= curPage + w; p++) if (p >= 1 && p <= pages) nums.add(p);
+      const arr = [...nums].sort((a, b) => a - b);
+      const it = (inner, cls) => '<li class="page-item' + (cls ? ' ' + cls : '') + '">' + inner + '</li>';
+      const lk = (p, label) => it('<a class="page-link" href="#" data-p="' + p + '">' + label + '</a>');
+      const dead = (label) => it('<span class="page-link">' + label + '</span>', 'disabled');
+      let html = curPage > 1 ? lk(1, '« <span class="pg-word">首页</span>') : dead('« <span class="pg-word">首页</span>');
+      html += curPage > 1 ? lk(curPage - 1, '‹ <span class="pg-word">上一页</span>') : dead('‹ <span class="pg-word">上一页</span>');
+      let prev = 0;
+      for (const p of arr) {
+        if (prev && p - prev > 1) html += it('<span class="page-link">…</span>', 'disabled');
+        html += p === curPage ? it('<span class="page-link" aria-current="page">' + p + '</span>', 'active') : lk(p, String(p));
+        prev = p;
+      }
+      html += curPage < pages ? lk(curPage + 1, '<span class="pg-word">下一页</span> ›') : dead('<span class="pg-word">下一页</span> ›');
+      html += curPage < pages ? lk(pages, '<span class="pg-word">末页</span> »') : dead('<span class="pg-word">末页</span> »');
+      return '<nav class="pagination-wrap" aria-label="分页导航"><ul class="pagination">' + html
+        + '</ul><p class="pagination-info">第 ' + curPage + ' / ' + pages + ' 页</p></nav>';
+    };
     fetch(base + 'search-index.json').then(r => r.ok ? r.json() : null).then(d => {
       if (!d) return;
       INDEX = d;
       if (total) total.textContent = d.count;
+      // 带 ?q= 进来时：先把词填进搜索框，真正的渲染放到函数都定义好之后再做
+      // （原来这里直接调 renderList，而它定义在下面 —— TDZ 报错会让整段 JS 挂掉，
+      //   搜索框/排序/筛选芯片/回到顶部全部失效，且被末尾的 .catch 静默吞掉）
       const params = new URLSearchParams(location.search);
       const q0 = (params.get('q') || '').trim();
       if (q0 && input) input.value = q0;
-      if (q0) renderList(q0.toLowerCase());
       if (input) {
         let t = null;
         input.addEventListener('input', () => {
           clearTimeout(t);
           t = setTimeout(() => {
             const q = input.value.trim().toLowerCase();
+            curPage = 1;
             renderList(q);
             const url = q ? (base + 'index.html?q=' + encodeURIComponent(input.value.trim())) : (base + 'index.html');
             history.replaceState(null, '', url);
@@ -1031,17 +1218,34 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         return arr;
       };
       const renderList = (q) => {
-        const list = applySort(INDEX.sets.filter(s => hits(s, q)));
+        const all = applySort(INDEX.sets.filter(s => hits(s, q)));
+        // 客户端分页：沿用同一套 Bootstrap 分页类名，搜索结果多时不再一屏铺完
+        const PER = 12;
+        const pages = Math.max(1, Math.ceil(all.length / PER));
+        if (curPage > pages) curPage = 1;
+        const list = all.slice((curPage - 1) * PER, curPage * PER);
         grid.innerHTML = list.map(cardHtml).join('');
         const head = document.querySelector('.page-head');
         if (head) {
           head.innerHTML = '<h1>' + (q ? '搜索结果' : '最新图集') + '</h1><p class="sub">'
-            + (q ? '匹配「' + esc(q) + '」共 ' + list.length + ' 套 · <a href="' + base + 'index.html" class="dim">清除筛选</a>'
+            + (q ? '匹配「' + esc(q) + '」共 ' + all.length + ' 套 · <a href="' + base + 'index.html" class="dim">清除筛选</a>'
                  : '共 ' + INDEX.count + ' 套') + '</p>';
         }
-        const pager = document.querySelector('.pager');
-        if (pager) pager.hidden = !!q;
-        if (empty) empty.hidden = list.length !== 0;
+        // 静态分页只在没筛选时显示；筛选时用客户端分页（注意别抓错元素：客户端那条也在 .pagination-wrap 里）
+        const staticPager = document.querySelector('.static-pager');
+        if (staticPager) staticPager.hidden = !!q;
+        if (clientPager) {
+          clientPager.hidden = !q || pages <= 1;
+          clientPager.innerHTML = (!q || pages <= 1) ? '' : clientPagerHtml(pages);
+          clientPager.querySelectorAll('a[data-p]').forEach(a => a.addEventListener('click', (e) => {
+            e.preventDefault();
+            curPage = parseInt(a.dataset.p, 10) || 1;
+            renderList(q);
+            const g = document.getElementById('grid');
+            if (g) window.scrollTo({ top: g.getBoundingClientRect().top + window.scrollY - 90, behavior: 'smooth' });
+          }));
+        }
+        if (empty) empty.hidden = all.length !== 0;
       };
       // 快捷筛选芯片：热门系列 + 模特
       if (chips) {
@@ -1058,12 +1262,14 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
           const q = b.dataset.q;
           chips.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
           if (input) input.value = q;
+          curPage = 1;
           renderList(q.toLowerCase());
           history.replaceState(null, '', base + 'index.html?q=' + encodeURIComponent(q));
         }));
       }
       if (sortSel) sortSel.addEventListener('change', () => {
         const q = (document.getElementById('q')?.value || '').trim().toLowerCase();
+        curPage = 1;
         renderList(q);
       });
       const toTop = document.getElementById('toTop');
@@ -1071,7 +1277,9 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         window.addEventListener('scroll', () => { toTop.hidden = window.scrollY < 600; }, { passive: true });
         toTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
       }
-    }).catch(() => {});
+      // 函数都就位了，现在才安全地按 URL 里的 ?q= 渲染初始结果
+      if (q0) renderList(q0.toLowerCase());
+    }).catch((e) => { console.error('[列表页]', e); });
   }
 
   // 详情页预览：行式铺满布局（每行 2~3 张，横向铺满整行，图片保持原比例不裁剪）
@@ -1439,14 +1647,28 @@ function build() {
   for (const [name, list] of Object.entries(byTag)) {
     writeFileSync(join(DIST, 'tag', `${name}.html`), collectionPage('tag', name, list, sets, '../', tagCloud))
   }
+  // ── 模特：列表页 + 每位模特一个独立页 ──
+  // 模特名来自每套图的 meta.model（后台「模特管理」可批量改名/合并，改一次全站生效）
+  const byModel = {}
+  sets.forEach(s => { if (s.model) (byModel[s.model] = byModel[s.model] || []).push(s) })
+  mkdirSync(join(DIST, 'model'), { recursive: true })
+  for (const [name, list] of Object.entries(byModel)) {
+    writeFileSync(join(DIST, 'model', `${name}.html`), modelPage(name, list, '../'))
+  }
+  if (Object.keys(byModel).length) writeFileSync(join(DIST, 'models.html'), modelsIndexPage(byModel, sets))
+  // 系列列表页：只在真的有系列时生成（否则是个空页面，反而困惑）
+  if (Object.keys(bySeries).length) writeFileSync(join(DIST, 'series.html'), seriesIndexPage(bySeries, sets))
+
   // 系列/标签索引页
   writeFileSync(join(DIST, 'collections.html'), layout({
     title: `全部系列与标签 - ${config.siteName}`,
     desc: `${config.siteName} 的系列与标签索引`,
     rel: '',
-    body: `<div class="page-head"><h1>系列与标签</h1><p class="sub">共 ${Object.keys(bySeries).length} 个系列 · ${Object.keys(byTag).length} 个标签</p></div>
+    body: `<div class="page-head"><h1>系列与标签</h1><p class="sub">共 ${Object.keys(bySeries).length} 个系列 · ${Object.keys(byTag).length} 个标签 · ${Object.keys(byModel).length} 位模特</p></div>
+      <h2 class="sec-title" id="models">模特</h2>
+      <div class="chips-cloud">${Object.entries(byModel).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="model/${encodeURIComponent(n)}.html">👤 ${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">暂无</span>'}</div>
       <h2 class="sec-title" id="series">系列</h2>
-      <div class="chips-cloud">${Object.entries(bySeries).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="series/${encodeURIComponent(n)}.html">${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">暂无</span>'}</div>
+      <div class="chips-cloud">${Object.entries(bySeries).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="series/${encodeURIComponent(n)}.html">${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">还没有系列：在后台编辑图集时填「系列」字段（比如某个模特的第几期），这里就会自动出现系列页</span>'}</div>
       <h2 class="sec-title" id="tags">标签</h2>
       <div class="chips-cloud">${Object.entries(byTag).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="tag/${encodeURIComponent(n)}.html">#${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">暂无</span>'}</div>`,
     canonical: pageUrl('collections.html'),
@@ -1550,9 +1772,12 @@ function build() {
   writeFileSync(join(DIST, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${base ? base + '/' : ''}sitemap.xml\n`)
   const urls = [
     { loc: pageUrl('index.html'), lastmod: sets[0]?.date || '', pri: '1.0' },
+    ...(Object.keys(byModel).length ? [{ loc: pageUrl('models.html'), lastmod: sets[0]?.date || '', pri: '0.8' }] : []),
+    ...(Object.keys(bySeries).length ? [{ loc: pageUrl('series.html'), lastmod: sets[0]?.date || '', pri: '0.6' }] : []),
     { loc: pageUrl('collections.html'), lastmod: sets[0]?.date || '', pri: '0.6' },
     { loc: pageUrl('about.html'), lastmod: '', pri: '0.3' },
     ...(config.privacy ? [{ loc: pageUrl('privacy.html'), lastmod: '', pri: '0.3' }] : []),
+    ...Object.entries(byModel).map(([n, l]) => ({ loc: pageUrl(`model/${encodeURIComponent(n)}.html`), lastmod: l.map(s => s.date || '').sort().pop() || '', pri: '0.7' })),
     ...sets.map(s => ({ loc: pageUrl(`set/${encodeURIComponent(s.slug)}/index.html`), lastmod: s.date, pri: '0.8' })),
     ...Object.entries(bySeries).map(([n, l]) => ({ loc: pageUrl(`series/${encodeURIComponent(n)}.html`), lastmod: l[0]?.date || '', pri: '0.5' })),
     ...Object.entries(byTag).map(([n, l]) => ({ loc: pageUrl(`tag/${encodeURIComponent(n)}.html`), lastmod: l[0]?.date || '', pri: '0.5' })),

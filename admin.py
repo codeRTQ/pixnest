@@ -1251,6 +1251,95 @@ def esc_attr(s):
             .replace('"', '&quot;').replace("'", '&#39;'))
 
 
+def model_stats(slugs):
+    """某模特的统计：套数、张数、真实总大小、最近日期、封面图"""
+    total = count = 0
+    latest, cover = '', ''
+    for sl in slugs:
+        d = os.path.join(SETS_DIR, sl)
+        meta = read_meta(d)
+        count += int(meta.get('imageCount') or len(set_images(d)) or 0)
+        img_dir = os.path.join(d, 'images')
+        if os.path.isdir(img_dir):
+            for f in os.listdir(img_dir):
+                p = os.path.join(img_dir, f)
+                if os.path.isfile(p):
+                    total += os.path.getsize(p)
+        dt = str(meta.get('date') or '')
+        if dt > latest:
+            latest = dt
+            c = next((f for f in ('cover.jpg', 'cover.jpeg', 'cover.png', 'cover.webp') if os.path.exists(os.path.join(d, f))), None)
+            thumb = os.path.join(d, 'thumbs', 'cover.jpg')
+            cover = f'/preview/{quote(sl)}/thumbs/cover.jpg' if os.path.exists(thumb) else (f'/preview/{quote(sl)}/{c}' if c else '')
+    gb = total / 1073741824
+    size = (f'{gb:.2f} GB' if gb >= 1 else f'{total / 1048576:.0f} MB') if total else ''
+    return {'sets': len(slugs), 'images': count, 'size': size, 'latest': latest, 'cover': cover}
+
+
+def rename_model(old, new):
+    """批量改名/合并：把 sets/*/meta.json 里的模特名从 old 改成 new，并迁移资料文件。
+    这是「改了一处、只有一个详情页生效」的正解 —— 模特名是每套图各存一份的。"""
+    old, new = (old or '').strip(), (new or '').strip()
+    if not old or not new:
+        return False, '模特名不能为空'
+    if old == new:
+        return False, '新旧名称相同'
+    changed, skipped = [], []
+    for s in list_sets():
+        d = os.path.join(SETS_DIR, s['slug'])
+        meta = read_meta(d)
+        if (meta.get('model') or '').strip() != old:
+            continue
+        meta['model'] = new
+        # 缓存的展示标题/描述里也可能带着旧名字，清掉让构建重新生成
+        for k in ('displayTitle', 'modelInfo'):
+            if isinstance(meta.get(k), str) and old in meta[k]:
+                if k == 'displayTitle':
+                    meta.pop(k, None)
+                else:
+                    meta[k] = meta[k].replace(old, new)
+        try:
+            save_meta(d, meta)
+            changed.append(s['slug'])
+        except Exception as e:  # noqa
+            skipped.append(f'{s["slug"]}: {e}')
+    # 资料文件跟着改名；目标已存在则合并（目标优先，缺失字段从旧资料补）
+    src = os.path.join(ROOT, 'models', f'{old}.json')
+    dst = os.path.join(ROOT, 'models', f'{new}.json')
+    moved = ''
+    if os.path.isfile(src):
+        try:
+            old_prof = json.load(open(src, encoding='utf-8'))
+        except Exception:  # noqa
+            old_prof = {}
+        if os.path.isfile(dst):
+            try:
+                cur = json.load(open(dst, encoding='utf-8'))
+            except Exception:  # noqa
+                cur = {}
+            for k, v in old_prof.items():
+                cur.setdefault(k, v)
+            write_model_profile(new, cur)
+            os.remove(src)
+            moved = f'资料已合并进「{new}」'
+        else:
+            os.rename(src, dst)
+            moved = f'资料文件已改名为 {new}.json'
+    return True, (f'✓ 已把「{old}」改名为「{new}」，更新 {len(changed)} 套图集'
+                  + (f'（{moved}）' if moved else '')
+                  + (f'\n! {len(skipped)} 套写入失败：' + '；'.join(skipped[:3]) if skipped else ''))
+
+
+def list_models_page_data():
+    """模特列表数据（后台用）：按套数排序，带统计与资料完整度"""
+    by_model = {}
+    for s in list_sets():
+        m = (s['meta'].get('model') or '').strip()
+        if m:
+            by_model.setdefault(m, []).append(s['slug'])
+    return by_model
+
+
 def models_page(msg=''):
     """模特资料：按模特统一维护（models/<模特>.json），改一次该模特全部图集生效"""
     by_model = {}
@@ -1273,15 +1362,30 @@ def models_page(msg=''):
     blocks = []
     for model, slugs in sorted(by_model.items(), key=lambda kv: -len(kv[1])):
         pf = read_model_profile(model)
+        st = model_stats(slugs)
+        filled = sum(1 for k, _, _ in FIELDS if pf.get(k))
         inputs = ''.join(
             f'<div><label>{label}</label><input type="text" data-f="{k}" value="{esc_attr(pf.get(k, ""))}" placeholder="{ph}"></div>'
             for k, label, ph in FIELDS)
         blocks.append(f"""<div class="panel" data-model="{esc_attr(model)}">
-  <h2>👤 {esc_attr(model)} <span class="sub" style="font-weight:400">· {len(slugs)} 套图集共用这份资料</span></h2>
+  <h2 style="display:flex;align-items:center;gap:12px">
+    {f'<img src="{esc_attr(st["cover"])}" alt="" style="width:44px;height:59px;object-fit:cover;border-radius:6px;background:#111">' if st['cover'] else ''}
+    <span>👤 {esc_attr(model)}
+      <span class="sub" style="font-weight:400">· {st['sets']} 套 · {st['images']} 张{(' · 合计 ' + st['size']) if st['size'] else ''}{(' · 最新 ' + st['latest']) if st['latest'] else ''}</span>
+    </span>
+  </h2>
+  <p class="sub" style="margin-top:-4px">资料完整度：{filled} / {len(FIELDS)} 个字段{'' if filled else '（留空的字段不会在站点上展示）'}</p>
+  <div class="row" style="margin:10px 0 4px;align-items:center">
+    <label style="margin:0">模特名</label>
+    <input type="text" class="mname" value="{esc_attr(model)}" style="max-width:220px">
+    <button class="btn danger sm" onclick="renameModel(this)">改名 / 合并到（应用到 {st['sets']} 套）</button>
+    <span class="sub" style="margin:0">改名会写入这 {st['sets']} 套图的元数据并重建站点；填一个已存在的名字＝合并</span>
+  </div>
   <div class="grid2">{inputs}</div>
   <div class="row" style="margin-top:12px">
     <button class="btn" onclick="saveModel(this)">保存并重建</button>
     <button class="btn danger sm" onclick="clearModel(this)">清空资料</button>
+    <a class="btn ghost sm" href="/?q={quote(model)}" target="_blank">在后台筛选这 {st['sets']} 套</a>
     <span class="sub mstate" style="margin:0"></span>
   </div>
 </div>""")
@@ -1305,6 +1409,17 @@ function clearModel(btn){
   if(!confirm('清空「'+model+'」的全部资料？（该模特名下所有图集都不再展示资料）'))return;
   box.querySelectorAll('input[data-f]').forEach(function(i){i.value=''});
   saveModel(box.querySelector('.btn'));
+}
+function renameModel(btn){
+  const box=btn.closest('.panel'),old=box.dataset.model;
+  const nw=(box.querySelector('.mname').value||'').trim();
+  if(!nw){toast('新名称不能为空',false);return}
+  if(nw===old){toast('名称没变',false);return}
+  if(!confirm('把「'+old+'」改名为「'+nw+'」？\\n\\n会写入该模特名下所有图集的元数据并重建站点。\\n如果「'+nw+'」已存在，相当于合并（资料会并入）。'))return;
+  btn.disabled=true;const st=box.querySelector('.mstate');st.textContent='改名并重建中…';
+  fetch('/model-rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:old,to:nw})})
+    .then(function(r){return r.text()}).then(function(t){toast(t,true);st.textContent=t.split('\\n')[0];setTimeout(function(){location.reload()},1500)})
+    .catch(function(e){toast('失败：'+e,false);st.textContent='';btn.disabled=false});
 }
 """)
 
@@ -2219,6 +2334,14 @@ class Handler(BaseHTTPRequestHandler):
             d = self._json_body()
             started, msg = autotag_batch_start(force=bool(d.get('force')), limit=int(d.get('limit') or 0))
             return self._json({'started': started, 'msg': msg}, 200 if started else 409)
+        if u.path == '/model-rename':
+            d = self._json_body()
+            ok, msg = rename_model(d.get('from', ''), d.get('to', ''))
+            if not ok:
+                return self._text('✗ ' + msg, 400)
+            okb, out = rebuild()
+            first = next((l for l in (out or '').splitlines() if l.strip()), '')
+            return self._text(msg + '\n' + ('  ✓ 站点已重建：' + first if okb else '  ✗ 站点重建失败：' + (out or '')[:160]))
         if u.path == '/models':
             d = self._json_body()
             model = (d.get('model') or '').strip()
