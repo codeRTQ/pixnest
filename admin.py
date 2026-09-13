@@ -383,6 +383,11 @@ code{background:rgba(255,180,84,.15);color:#ffb454;padding:1px 6px;border-radius
 /* 批量操作栏 */
 .bulk{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px;padding:10px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px}
 .bulk input[type=text]{max-width:200px}
+/* 网盘链接批量导入：预览表格 */
+table.lk{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
+table.lk th,table.lk td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+table.lk th{color:var(--dim);font-weight:500;white-space:nowrap}
+table.lk tr.bad td{color:#ff8a8a}
 .set .pick{position:absolute;top:8px;right:8px;width:20px;height:20px;cursor:pointer;z-index:2}
 .set{position:relative}
 .set.picked{outline:2px solid var(--accent)}
@@ -455,6 +460,121 @@ def sets_cards(sets):
             <button class="mini" onclick="event.stopPropagation();del('{s['slug']}')">删除</button>
           </div></div></div>""")
     return ''.join(cards) or '<p class="sub">暂无图集，先上传一套</p>'
+
+
+def links_page(msg=''):
+    """网盘链接批量导入页：粘贴 → 自动匹配图集 → 预览 → 应用"""
+    sets = list_sets()
+    samples = '\n'.join([
+        'NO.001 | 天翼云盘 | https://cloud.189.cn/t/xxxxxxxx | 8a2k',
+        'NO.002 | 天翼云盘 | https://cloud.189.cn/t/yyyyyyyy',
+        'OL制服 | 百度网盘 | https://pan.baidu.com/s/1abcdef | 1234',
+    ])
+    return page('批量导入网盘链接', f"""
+<a class="btn ghost sm" href="/">← 返回后台</a>
+<form class="panel" id="lk">
+  <h2>网盘链接批量导入（{len(sets)} 套图集）</h2>
+  <p class="sub">每行一套，用 <code>|</code> 分隔（也支持逗号或制表符）：<br>
+    <code>关键词 | 网盘名(可省) | 链接 | 提取码(可省)</code><br>
+    「关键词」会去匹配图集的标题/目录名，支持 <code>NO.001</code> 这种编号，也支持中文片段。</p>
+  <div class="row">
+    <label style="margin:0">默认网盘名</label>
+    <input type="text" id="dft" value="天翼云盘" style="max-width:200px">
+    <label style="margin:0"><input type="checkbox" id="onlyEmpty" checked> 只覆盖尚未填链接的图集</label>
+  </div>
+  <textarea id="txt" rows="12" placeholder="{samples}" style="width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:12px;font-family:ui-monospace,Consolas,monospace;font-size:13px"></textarea>
+  <div class="row">
+    <button type="button" class="btn ghost" onclick="lkRun(false)">① 预览匹配结果</button>
+    <button type="button" class="btn" onclick="lkRun(true)">② 确认并应用</button>
+    <span class="sub" id="lkMsg" style="margin:0"></span>
+  </div>
+  <div id="lkOut"></div>
+</form>""", extra_js="""
+function lkRun(apply){
+  const txt=document.getElementById('txt').value.trim();
+  if(!txt){toast('请先粘贴内容',false);return}
+  const msg=document.getElementById('lkMsg');msg.textContent=apply?'应用中…':'匹配中…';
+  fetch('/links',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({text:txt,defaultNetdisk:document.getElementById('dft').value,onlyEmpty:document.getElementById('onlyEmpty').checked,apply:apply})})
+  .then(r=>r.json()).then(d=>{
+    msg.textContent=d.summary||'';
+    const rows=d.rows.map(r=>'<tr class="'+(r.status==='ok'?'':'bad')+'"><td>'+r.keyword+'</td><td>'+(r.title||'—')+'</td><td>'+(r.netdisk||'—')+'</td><td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(r.url||'—')+'</td><td>'+(r.code||'—')+'</td><td>'+r.msg+'</td></tr>').join('');
+    document.getElementById('lkOut').innerHTML='<table class="lk"><thead><tr><th>关键词</th><th>匹配到的图集</th><th>网盘</th><th>链接</th><th>提取码</th><th>状态</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    if(apply&&d.applied){toast('已应用 '+d.applied+' 套，正在重建站点…',true)}
+  }).catch(e=>{msg.textContent='失败：'+e});
+}
+""")
+
+
+def parse_link_lines(text, default_netdisk=''):
+    """把粘贴的文本解析成 [{keyword, netdisk, url, code}]
+
+    支持写法（分隔符可用 | 、制表符、逗号）：
+        关键词 | 网盘名 | 链接 | 提取码
+        关键词 | 链接 | 提取码
+        关键词 | 链接            （网盘名用默认值）
+    也支持把提取码写在链接里：?pwd=8a2k，或「提取码: 8a2k / 密码：1234」
+    """
+    out = []
+    for raw in (text or '').splitlines():
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        parts = [p.strip() for p in re.split(r'\s*[|\t]\s*|\s*,\s*', line) if p.strip() != '']
+        if len(parts) < 2:
+            continue
+        kw = parts[0]
+        rest = parts[1:]
+        url_i = next((i for i, p in enumerate(rest) if 'http' in p), -1)
+        url = rest[url_i] if url_i >= 0 else ''
+        before = rest[:url_i] if url_i >= 0 else rest[:-1]
+        after = rest[url_i + 1:] if url_i >= 0 else rest[-1:]
+        netdisk = before[0] if before else default_netdisk
+        code = after[0] if after else ''
+        # 兜底一：链接里带 ?pwd=xxxx
+        m = re.search(r'[?&](?:pwd|password|passcode)=([0-9a-zA-Z]{2,10})', url)
+        if m and not code:
+            code = m.group(1)
+        # 兜底二：任意位置写了「提取码/密码: xxxx」
+        if not code:
+            m = re.search(r'(?:提取码|访问码|密码|pwd|code)\s*[:：=]?\s*([0-9a-zA-Z]{2,10})', line, re.I)
+            if m:
+                code = m.group(1)
+        # 兜底三：没识别到链接时，把最后一段当链接
+        if not url:
+            url = rest[-1]
+        # 链接字段里夹了说明文字时，抽出真正的网址
+        m = re.search(r'https?://[^\s|]+', url)
+        if m:
+            url = m.group(0).rstrip('，。.,;；、')
+        out.append({'keyword': kw, 'netdisk': netdisk, 'url': url, 'code': code})
+    return out
+
+
+def match_set(keyword, sets):
+    """按关键词找图集：目录名精确 > 标题/目录名包含 > 编号匹配"""
+    kw = (keyword or '').strip().lower()
+    if not kw:
+        return None, 'empty'
+    for s in sets:
+        if s['slug'].lower() == kw:
+            return s, 'exact'
+    hits = [s for s in sets
+            if kw in (s['meta'].get('title') or '').lower() or kw in s['slug'].lower()]
+    if len(hits) == 1:
+        return hits[0], 'ok'
+    if len(hits) > 1:
+        # 多个命中时，优先「编号完全相同」的那个（NO.001 / no-001 / 001）
+        num = re.search(r'\d+', kw)
+        if num:
+            n = int(num.group())
+            same = [s for s in hits
+                    if re.search(r'no[.\-_ ]?0*%d(?:\D|$)' % n, s['slug'].lower())
+                    or re.search(r'no[.\-_ ]?0*%d(?:\D|$)' % n, (s['meta'].get('title') or '').lower())]
+            if len(same) == 1:
+                return same[0], 'ok'
+        return None, f'匹配到 {len(hits)} 套，请写更精确的关键词'
+    return None, '没找到匹配的图集'
 
 
 def all_tags():
@@ -593,14 +713,18 @@ def home_page(msg=''):
     <div><label>标签（逗号分隔）</label><input type="text" name="tags" placeholder="油菜花,清新,户外"></div>
     <div><label>图片像素（留空自动检测）</label><input type="text" name="resolution" placeholder="留空 = 自动从上传图片读取真实尺寸"></div>
     <div><label>解压密码</label><input type="text" name="password" placeholder="例：vx666878787"></div>
-    <div><label>下载网盘</label><input type="text" name="netdisk" placeholder="例：MediaFire"></div>
+    <div><label>下载网盘</label><input type="text" name="netdisk" placeholder="例：天翼云盘 / 百度网盘"></div>
     <div><label>网盘下载外链（可选）</label><input type="text" name="downloadUrl" placeholder="https://..."></div>
+    <div><label>网盘提取码（可选）</label><input type="text" name="shareCode" placeholder="例：8a2k"></div>
     <div><label>目录名（可选）</label><input type="text" name="slug" placeholder="留空自动生成"></div>
   </div>
   <div><label style="margin-top:12px">描述（可选）</label><textarea name="description" rows="2"></textarea></div>
-  <div class="drop" id="drop"><div><strong>拖拽图片到这里</strong> 或 <strong>点击选择</strong>（可多选）</div>
+  <div class="drop" id="drop"><div><strong>拖拽图片/文件夹到这里</strong> 或 <strong>点击选择图片</strong>（可多选）</div>
     <div style="font-size:12px;margin-top:6px">缩略图 {PREVIEW_W}px 自动生成 · 封面自动 {COVER_W}×{COVER_H} 裁切</div>
     <input type="file" id="imgs" name="images" accept="image/*" multiple hidden></div>
+  <div class="row"><button type="button" class="btn ghost sm" id="pickFolder">📁 选择整个文件夹导入</button>
+    <span class="sub" style="margin:0">按文件名排序（00001→00041）· 自动用文件夹名填标题</span>
+    <input type="file" id="folder" webkitdirectory directory multiple hidden></div>
   <div class="files" id="files"></div>
   <div class="row"><label style="margin:0"><input type="checkbox" id="mkcover"> 另选封面图</label>
     <input type="file" id="coverfile" name="cover" accept="image/*" hidden>
@@ -636,26 +760,84 @@ def home_page(msg=''):
   <button class="btn ghost" onclick="detectResAll()">📐 自动检测所有图集像素</button>
   <button class="btn ghost" onclick="autotagAll()">🤖 批量自动打标（未打标的图集）</button>
   <a class="btn ghost" href="/tags">🏷 标签管理</a>
+  <a class="btn ghost" href="/links">🔗 批量导入网盘链接</a>
   <a class="btn ghost" href="http://127.0.0.1:8090/" target="_blank">打开站点预览 ↗</a></div></div>"""
     extra = """
 const drop=document.getElementById('drop'),imgs=document.getElementById('imgs'),files=document.getElementById('files');
 const mk=document.getElementById('mkcover'),cf=document.getElementById('coverfile'),pc=document.getElementById('pickcover'),cn=document.getElementById('covername');
+let chosen=[];                       // 实际上传的文件（保持顺序）
+const IMGRE=/\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
 drop.onclick=()=>imgs.click();
 drop.ondragover=e=>{e.preventDefault();drop.classList.add('on')};
 drop.ondragleave=()=>drop.classList.remove('on');
-drop.ondrop=e=>{e.preventDefault();drop.classList.remove('on');imgs.files=e.dataTransfer.files;show()};
-imgs.onchange=show;
-function show(){files.innerHTML=[...imgs.files].map((f,i)=>'<div>'+(i+1)+'. '+f.name+' · '+(f.size/1048576).toFixed(2)+'MB</div>').join('');document.getElementById('submit').textContent=imgs.files.length?('上传 '+imgs.files.length+' 张并生成站点'):'上传并生成站点'}
+drop.ondrop=async e=>{
+  e.preventDefault();drop.classList.remove('on');
+  const hasDir=[...(e.dataTransfer.items||[])].some(i=>{const en=i.webkitGetAsEntry&&i.webkitGetAsEntry();return en&&en.isDirectory});
+  if(hasDir){
+    toast('正在读取文件夹…');
+    const got=await walkItems(e.dataTransfer.items);
+    applyFolder(got.files,got.rootName);
+  }else{
+    chosen=[...e.dataTransfer.files];show();
+  }
+};
+imgs.onchange=()=>{chosen=[...imgs.files];show()};
+// ── 文件夹导入：选择整个文件夹 → 按文件名排序 → 用文件夹名填标题 ──
+const folderInput=document.getElementById('folder');
+document.getElementById('pickFolder').onclick=()=>folderInput.click();
+folderInput.onchange=()=>{
+  const fs=[...folderInput.files].filter(f=>IMGRE.test(f.name));
+  const root=(folderInput.files[0]&&folderInput.files[0].webkitRelativePath||'').split('/')[0]||'';
+  applyFolder(fs,root);
+};
+function applyFolder(fs,rootName){
+  fs.sort((a,b)=>(a.webkitRelativePath||a.name).localeCompare(b.webkitRelativePath||b.name,'zh',{numeric:true}));
+  chosen=fs;
+  if(fs.length){
+    const t=document.querySelector('input[name=title]');
+    const model=(document.querySelector('input[name=model]').value||'').trim();
+    let name=rootName||'';
+    // 文件夹名形如「许岚 NO.001 教室JK黑丝」→ 去掉开头的模特名，作为标题
+    if(model&&name.startsWith(model))name=name.slice(model.length).trim();
+    if(name&&!t.value.trim())t.value=name;
+    toast('已选 '+fs.length+' 张：'+(rootName?('文件夹「'+rootName+'」'):''));
+  }else{toast('这个文件夹里没有图片',false)}
+  show();
+}
+// 递归读取拖入的文件夹（DataTransferItem → FileSystemEntry）
+function readEntries(rd){return new Promise(res=>{const all=[];const step=()=>rd.readEntries(es=>{if(!es.length)return res(all);all.push(...es);step()});step()})}
+async function walkEntry(entry,acc){
+  if(!entry)return;
+  if(entry.isFile){acc.push(entry);return}
+  if(entry.isDirectory){for(const e of await readEntries(entry.createReader()))await walkEntry(e,acc)}
+}
+async function walkItems(items){
+  const entries=[];
+  for(const it of items){const en=it.webkitGetAsEntry&&it.webkitGetAsEntry();if(en)await walkEntry(en,entries)}
+  const out=[];
+  for(const en of entries){
+    if(!IMGRE.test(en.name))continue;
+    const f=await new Promise(r=>en.file(r));
+    try{f.relPath=en.fullPath}catch(e){}
+    out.push(f);
+  }
+  return {files:out,rootName:(entries[0]&&entries[0].fullPath||'').split('/')[1]||''};
+}
+function show(){files.innerHTML=chosen.map((f,i)=>'<div>'+(i+1)+'. '+f.name+' · '+(f.size/1048576).toFixed(2)+'MB</div>').join('');document.getElementById('submit').textContent=chosen.length?('上传 '+chosen.length+' 张并生成站点'):'上传并生成站点'}
 mk.onchange=()=>{pc.disabled=!mk.checked;if(!mk.checked){cf.value='';cn.textContent=''}};
 pc.onclick=()=>cf.click();cf.onchange=()=>{cn.textContent=cf.files[0]?cf.files[0].name:'（未选）'};
-document.getElementById('f').onsubmit=()=>{if(!imgs.files.length){toast('请至少选择一张图片',false);return false}const b=document.getElementById('submit');b.disabled=true;b.textContent='上传中，请稍候…'};
+document.getElementById('f').onsubmit=()=>{if(!chosen.length){toast('请至少选择一张图片或一个文件夹',false);return false}const b=document.getElementById('submit');b.disabled=true;b.textContent='上传中，请稍候…'};
 // 上传进度（XHR 上报进度 + 服务端处理阶段提示）
 const upForm=document.getElementById('f');
 if(upForm&&window.XMLHttpRequest){
   upForm.addEventListener('submit',function(ev){
-    if(!imgs.files.length)return;
+    if(!chosen.length)return;
     ev.preventDefault();
-    const fd=new FormData(upForm),xhr=new XMLHttpRequest();
+    const fd=new FormData(upForm);
+    // 用选定顺序（文件夹导入已按文件名排序）替换表单自带的文件列表
+    fd.delete('images');
+    chosen.forEach(f=>fd.append('images',f,f.name));
+    const xhr=new XMLHttpRequest();
     const wrap=document.getElementById('progWrap'),bar=document.getElementById('progBar'),hint=document.getElementById('upProgress');
     wrap.hidden=false;bar.style.width='0%';hint.textContent='上传中…';
     xhr.upload.onprogress=function(e){if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);bar.style.width=p+'%';hint.textContent='上传中 '+p+'%（'+ (e.loaded/1048576).toFixed(1) +'MB / '+ (e.total/1048576).toFixed(1) +'MB）';}};
@@ -864,6 +1046,7 @@ def edit_page(slug, msg=''):
       <div><label>解压密码</label><input type="text" name="password" value="{m.get('password','')}"></div>
       <div><label>下载网盘</label><input type="text" name="netdisk" value="{m.get('netdisk','')}"></div>
       <div><label>网盘外链（留空则用本地 pack.zip）</label><input type="text" name="downloadUrl" value="{m.get('downloadUrl','')}"></div>
+      <div><label>网盘提取码</label><input type="text" name="shareCode" value="{m.get('shareCode','')}" placeholder="例：8a2k"></div>
       <div><label>展示的预览图数量</label><input type="text" name="previewCount" value="{m.get('previewCount','')}" placeholder="留空=默认 8 或全部"></div>
       <div><label>日期</label><input type="date" name="date" value="{m.get('date','')}"></div>
     </div>
@@ -943,6 +1126,10 @@ class Handler(BaseHTTPRequestHandler):
     def _html(self, s, code=200):
         self._send(code, s.encode('utf-8'))
 
+    def _json(self, obj, code=200):
+        self._send(code, json.dumps(obj, ensure_ascii=False).encode('utf-8'),
+                   'application/json; charset=utf-8')
+
     def _json_body(self):
         n = int(self.headers.get('Content-Length', 0))
         try:
@@ -985,6 +1172,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(edit_page(unquote(qs.get('slug', ''))))
         if u.path == '/tags':
             return self._html(tags_page())
+        if u.path == '/links':
+            return self._html(links_page())
         if u.path.startswith('/preview/'):
             from urllib.parse import unquote
             return self._serve_file(unquote(u.path[len('/preview/'):]))
@@ -998,6 +1187,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.handle_upload()
         if u.path == '/save':
             return self.handle_save()
+        if u.path == '/links':
+            return self.handle_links()
         if u.path == '/delete':
             d = self._json_body()
             slug = d.get('slug', '')
@@ -1231,6 +1422,61 @@ class Handler(BaseHTTPRequestHandler):
         self._text('not found', 404)
 
     # ── 上传 ──
+    def handle_links(self):
+        """网盘链接批量导入：解析粘贴内容 → 匹配图集 → 预览或应用"""
+        d = self._json_body()
+        text = d.get('text', '')
+        default_netdisk = (d.get('defaultNetdisk') or '').strip()
+        only_empty = bool(d.get('onlyEmpty'))
+        apply = bool(d.get('apply'))
+
+        sets = list_sets()
+        lines = parse_link_lines(text, default_netdisk)
+        rows, applied = [], 0
+        for it in lines:
+            s, status = match_set(it['keyword'], sets)
+            row = {'keyword': it['keyword'], 'netdisk': it['netdisk'], 'url': it['url'],
+                   'code': it['code'], 'status': 'ok' if s else 'bad', 'msg': ''}
+            if not s:
+                row['msg'] = status
+                rows.append(row)
+                continue
+            m = s['meta']
+            row['title'] = m.get('title') or s['slug']
+            if only_empty and m.get('downloadUrl'):
+                row['status'] = 'skip'
+                row['msg'] = '已有链接（跳过）'
+                rows.append(row)
+                continue
+            if not it['url']:
+                row['status'] = 'bad'
+                row['msg'] = '没解析到链接'
+                rows.append(row)
+                continue
+            if apply:
+                set_dir = os.path.join(SETS_DIR, s['slug'])
+                meta = read_meta(set_dir)
+                if it['netdisk']:
+                    meta['netdisk'] = it['netdisk']
+                meta['downloadUrl'] = it['url']
+                if it['code']:
+                    meta['shareCode'] = it['code']
+                save_meta(set_dir, meta)
+                applied += 1
+                row['msg'] = '✓ 已写入'
+            else:
+                row['msg'] = '可导入'
+            rows.append(row)
+
+        if apply and applied:
+            ok, out = rebuild()
+            tail = next((l for l in (out or '').splitlines() if l.strip()), '')
+            summary = f'已应用 {applied} 套{"（站点已重建：" + tail + "）" if ok else "（站点重建失败）"}'
+        else:
+            good = len([r for r in rows if r['status'] == 'ok'])
+            summary = f'共 {len(rows)} 行：可导入 {good} 套，未匹配 {len([r for r in rows if r["status"] == "bad"])} 行'
+        return self._json({'rows': rows, 'summary': summary, 'applied': applied})
+
     def handle_upload(self):
         form = cgi.FieldStorage(fp=self.rfile, headers=self.headers,
                                 environ={'REQUEST_METHOD': 'POST', 'CONTENT_TYPE': self.headers.get('Content-Type', '')})
@@ -1301,6 +1547,10 @@ class Handler(BaseHTTPRequestHandler):
         })
         if g('downloadUrl'):
             meta['downloadUrl'] = g('downloadUrl')
+        if g('shareCode'):
+            meta['shareCode'] = g('shareCode')
+        elif 'shareCode' in meta:
+            del meta['shareCode']
         # 图片像素：优先自动检测（手填值仅在没有图片时保留）
         res_txt, res_info = detect_resolution(set_dir)
         if res_txt:
@@ -1382,6 +1632,10 @@ class Handler(BaseHTTPRequestHandler):
             meta['downloadUrl'] = g('downloadUrl')
         elif 'downloadUrl' in meta:
             del meta['downloadUrl']
+        if g('shareCode'):
+            meta['shareCode'] = g('shareCode')
+        elif 'shareCode' in meta:
+            del meta['shareCode']
         pc = g('previewCount')
         if pc:
             try:

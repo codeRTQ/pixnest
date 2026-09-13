@@ -255,6 +255,7 @@ function readSet(slug) {
     tags: meta.tags || [],
     description: meta.description || '',
     password: meta.password || '',
+    shareCode: meta.shareCode || '',
     netdisk: meta.netdisk || '',
     downloadUrl: meta.downloadUrl || (hasPack ? `pack.zip` : ''),
     resolution: meta.resolution || '',
@@ -459,9 +460,11 @@ function detailPage(s, prev, next, canonical = '', related = []) {
               ? `<span class="btn btn-disabled">压缩包未随站点部署（请用网盘链接）</span>`
               : `<span class="btn btn-disabled">暂无下载</span>`)))}
       ${s.olDir && s.password ? `<span class="dl-hint">目录密码：<code>${esc(s.password)}</code></span>` : ''}
+      ${!s.olDir && s.shareCode ? `<span class="dl-hint">提取码：<code>${esc(s.shareCode)}</code></span>` : ''}
     </div>
     <dl class="dl-info">
       ${s.password ? `<div><dt>解压密码</dt><dd><code>${esc(s.password)}</code></dd></div>` : ''}
+      ${s.shareCode ? `<div><dt>提取码</dt><dd><code>${esc(s.shareCode)}</code></dd></div>` : ''}
       ${s.netdisk ? `<div><dt>${s.olDir ? '原图存放' : '下载网盘'}</dt><dd>${esc(s.netdisk)}</dd></div>` : ''}
       ${s.resolution ? `<div><dt>图片像素</dt><dd>${esc(s.resolution)}</dd></div>` : ''}
       <div><dt>图片数量</dt><dd>${s.imageCount} 张</dd></div>
