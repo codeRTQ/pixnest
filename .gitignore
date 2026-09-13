@@ -10,6 +10,10 @@ _admin.log
 _admin.err.log
 *.log
 browser-screenshots/
+# 以下划线开头的都是临时脚本/产物（排查、一次性脚本），不入库
+_*.py
+_*.js
+_*.txt
 
 # 工具缓存（含 wrangler 账号信息）
 .wrangler/

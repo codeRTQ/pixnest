@@ -311,16 +311,24 @@ function relatedSets(set, all, limit = config.relatedCount || 4) {
 }
 
 /** 系列页 / 标签页（静态化，利于搜索引擎收录） */
-function collectionPage(kind, name, sets, all, rel = '../') {
+function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
   const label = kind === 'series' ? '系列' : '标签'
+  const cloudHtml = cloud.length
+    ? `<section class="cloud-sec">
+    <h2 class="sec-title">全部${label}（${cloud.length}）<span class="dim" style="font-size:13px;font-weight:400"> · 点任意一个直接切换</span></h2>
+    <div class="chips-cloud">${cloud.map(([n, list]) =>
+      `<a class="cloud-chip${n === name ? ' on' : ''}" href="${rel}${kind}/${encodeURIComponent(n)}.html">${kind === 'tag' ? '#' : ''}${esc(n)}<span>${Array.isArray(list) ? list.length : list}</span></a>`).join('')}</div>
+  </section>`
+    : ''
   const body = `
-  <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><span>${label}</span><span>/</span><span class="cur">${esc(name)}</span></nav>
+  <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}collections.html#${kind}">${label}</a><span>/</span><span class="cur">${esc(name)}</span></nav>
   <div class="page-head">
     <h1>${esc(name)}</h1>
     <p class="sub">${label}「${esc(name)}」共 ${sets.length} 套图集</p>
   </div>
   <div class="grid">${sets.map(s => card(s, rel)).join('')}</div>
-  <p class="more-hint"><a href="${rel}index.html" class="dim">← 返回全部图集</a></p>`
+  <p class="more-hint"><a href="${rel}index.html" class="dim">← 返回全部图集</a></p>
+  ${cloudHtml}`
   const url = pageUrl(`${kind === 'series' ? 'series' : 'tag'}/${encodeURIComponent(name)}.html`)
   return layout({
     title: `${name} · ${label} - ${config.siteName}`,
@@ -402,8 +410,8 @@ const card = (s, rel = '') => `
     <h2 class="card-title">${esc(s.title)}</h2>
   </a>
   <div class="card-meta">
-    ${s.series ? `<span class="tag tag-series">${esc(s.series)}</span>` : ''}
-    ${s.tags.slice(0, 2).map(t => `<span class="tag">${esc(t)}</span>`).join('')}
+    ${s.series ? `<a class="tag tag-series" href="${rel}series/${encodeURIComponent(s.series)}.html" title="查看该系列全部图集">${esc(s.series)}</a>` : ''}
+    ${s.tags.slice(0, 2).map(t => `<a class="tag tag-link" href="${rel}tag/${encodeURIComponent(t)}.html" title="查看同标签图集">${esc(t)}</a>`).join('')}
     <time datetime="${esc(s.date)}">${esc(s.date)}</time>
   </div>
 </article>`
@@ -625,6 +633,8 @@ img{max-width:100%;display:block}
 .cloud-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg);text-decoration:none;font-size:13px}
 .cloud-chip span{background:var(--panel2);border-radius:999px;padding:1px 8px;color:var(--dim);font-size:12px}
 .cloud-chip:hover{border-color:var(--accent)}
+.cloud-chip.on{border-color:var(--accent);background:rgba(91,140,255,.14);color:var(--fg)}
+.cloud-sec{margin:34px 0 10px;padding-top:22px;border-top:1px solid var(--line)}
 .grid.related{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
 .grid.related .card-title{font-size:13px}
 /* 窄屏：相关推荐排 2 列，避免卡片过窄 */
@@ -646,8 +656,9 @@ img{max-width:100%;display:block}
 .card-title{margin:0;padding:12px 12px 6px;font-size:14px;line-height:1.5;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:0 12px 12px;font-size:12px;color:var(--dim)}
 .card-meta time{margin-left:auto}
-.tag{padding:1px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--dim);font-size:12px}
+.tag{padding:1px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--dim);font-size:12px;text-decoration:none;display:inline-block;transition:.15s}
 .tag-series{color:var(--accent);border-color:rgba(91,140,255,.4)}
+.card-meta a.tag:hover,.detail-meta a.tag:hover{color:var(--accent);border-color:var(--accent);background:rgba(91,140,255,.12)}
 .pager{display:flex;align-items:center;justify-content:center;gap:18px;margin:34px 0}
 /* 筛选栏 */
 .filters{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 16px}
@@ -706,6 +717,8 @@ img{max-width:100%;display:block}
 .stream-hint{color:var(--dim);text-align:center;font-size:13px;margin:14px 0}
 .tag-link{text-decoration:none;transition:.15s}
 .tag-link:hover{color:var(--accent);border-color:var(--accent);background:rgba(91,140,255,.12)}
+/* 首页/列表页卡片标签：系列与标签都可点，跳到对应的系列页/标签页 */
+.card-meta .tag{cursor:pointer}
 .tag-model{color:var(--accent2);border-color:rgba(255,180,84,.4)}
 .model-info{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent2);border-radius:10px;padding:12px 14px;margin:0 0 18px;font-size:13.5px;line-height:1.7}
 .mi-label{flex:0 0 auto;color:var(--accent2);font-weight:600}
@@ -827,8 +840,8 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       '<h2 class="card-title">' + esc(s.title) + '</h2>',
       '</a>',
       '<div class="card-meta">',
-      (s.series ? '<span class="tag tag-series">' + esc(s.series) + '</span>' : ''),
-      (s.tags || []).slice(0, 2).map(t => '<span class="tag">' + esc(t) + '</span>').join(''),
+      (s.series ? '<a class="tag tag-series" href="' + base + 'series/' + encodeURIComponent(s.series) + '.html">' + esc(s.series) + '</a>' : ''),
+      (s.tags || []).slice(0, 2).map(t => '<a class="tag tag-link" href="' + base + 'tag/' + encodeURIComponent(t) + '.html">' + esc(t) + '</a>').join(''),
       '<time>' + esc(s.date) + '</time>',
       '</div></article>',
     ].join('');
@@ -1120,11 +1133,14 @@ function build() {
   })
   mkdirSync(join(DIST, 'series'), { recursive: true })
   mkdirSync(join(DIST, 'tag'), { recursive: true })
+  // 标签/系列云（按图集数排序）：给每个标签页底部一份，方便访客横向浏览
+  const tagCloud = Object.entries(byTag).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+  const seriesCloud = Object.entries(bySeries).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
   for (const [name, list] of Object.entries(bySeries)) {
-    writeFileSync(join(DIST, 'series', `${name}.html`), collectionPage('series', name, list, sets))
+    writeFileSync(join(DIST, 'series', `${name}.html`), collectionPage('series', name, list, sets, '../', seriesCloud))
   }
   for (const [name, list] of Object.entries(byTag)) {
-    writeFileSync(join(DIST, 'tag', `${name}.html`), collectionPage('tag', name, list, sets))
+    writeFileSync(join(DIST, 'tag', `${name}.html`), collectionPage('tag', name, list, sets, '../', tagCloud))
   }
   // 系列/标签索引页
   writeFileSync(join(DIST, 'collections.html'), layout({
@@ -1132,9 +1148,9 @@ function build() {
     desc: `${config.siteName} 的系列与标签索引`,
     rel: '',
     body: `<div class="page-head"><h1>系列与标签</h1><p class="sub">共 ${Object.keys(bySeries).length} 个系列 · ${Object.keys(byTag).length} 个标签</p></div>
-      <h2 class="sec-title">系列</h2>
+      <h2 class="sec-title" id="series">系列</h2>
       <div class="chips-cloud">${Object.entries(bySeries).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="series/${encodeURIComponent(n)}.html">${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">暂无</span>'}</div>
-      <h2 class="sec-title">标签</h2>
+      <h2 class="sec-title" id="tags">标签</h2>
       <div class="chips-cloud">${Object.entries(byTag).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="tag/${encodeURIComponent(n)}.html">#${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">暂无</span>'}</div>`,
     canonical: pageUrl('collections.html'),
   }))
