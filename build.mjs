@@ -34,6 +34,8 @@ const defaultConfig = {
   previewCount: 8,
   relatedCount: 4,           // 详情页「相关推荐」条数（4 条正好一行）
   modelSideCount: 5,         // 详情页侧栏「模特的其他作品」条数
+  previewRowTarget: 460,     // 预览区行式布局的目标行高（px）：每行 2~3 张，横向铺满整行
+  previewRowMax: 3,          // 预览区每行最多几张（2 或 3）
   assetSalt: '2',            // CSS/JS 版本盐：assets 是 immutable 长缓存，改了样式若边缘缓存不刷新，把它 +1 即可强制换 URL
   icp: '',
   // 合规相关（部署前请按当地法律与平台要求配置）
@@ -459,7 +461,7 @@ function listPage(sets, page, totalPages, rel = '', total = sets.length) {
   })
 }
 
-function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}, fillSet = null, moreSets = [], modelTotal = 0) {
+function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}, moreSets = [], modelTotal = 0) {
   const rel = '../../'
   // 模特资料：仅展示填写过的字段（AI 不会生成这些）
   const pf = s.profile || {}
@@ -532,17 +534,6 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
         <figcaption>${i + 1} / ${s.imageCount}</figcaption>
       </figure>`
       }).join('')}
-      ${fillSet ? `<a class="preview fill-card" id="fillCard" data-fill="1" hidden
-         href="${rel}set/${fillSet.slug}/index.html" title="${esc(fillSet.title)}">
-        <img class="fill-img" alt="${esc(fillSet.title)}"
-             ${fillSet.coverFile ? `data-src="${rel}set/${fillSet.slug}/${fillSet.coverThumb ? 'thumbs/' + fillSet.coverThumb + verQ(fillSet.thumbVer[fillSet.coverThumb]) : fillSet.coverFile}"` : ''}>
-        <span class="fill-body">
-          <span class="fill-badge">猜你喜欢</span>
-          <b class="fill-title">${esc(fillSet.displayTitle || fillSet.title)}</b>
-          <span class="fill-meta">${esc(fillSet.model || '')}${fillSet.model ? ' · ' : ''}${fillSet.imageCount}P${fillSet.packSize ? ' · ' + esc(fillSet.packSize) : ''}</span>
-          <span class="fill-go">查看这套 →</span>
-        </span>
-      </a>` : ''}
     </div>
     <p class="stream-hint" id="streamHint">已加载 <span id="loadedCount">0</span> / ${s.previews.length} 张预览 · 滚动时自动加载 · <b>点击图片打开画廊</b>${s.olDir ? ` · 右上角「原图 ↗」直达原图` : ''}</p>
     ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张，以上为部分预览 · ${s.olDir ? `完整原图请到 <a href="${esc(s.olDir)}" target="_blank" rel="noopener">${esc(s.netdisk || 'OpenList')}</a> 查看` : (s.downloadUrl ? `完整图集请点上方下载按钮${s.netdisk ? `（${esc(s.netdisk)}）` : ''}` : '完整图集请下载压缩包')}</p>` : ''}`
@@ -773,20 +764,6 @@ img{max-width:100%;display:block}
 .preview-link{display:block;width:100%;height:100%;position:relative}
 .preview-link::after{content:'点击看原图';position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:2px 8px;border-radius:999px;opacity:0;transition:opacity .2s}
 .preview:hover .preview-link::after{opacity:1}
-/* 瀑布流底部空隙填充卡（「猜你喜欢」）：把最后一行补满，底边与两侧列齐平 */
-.fill-card{display:flex;flex-direction:column;text-decoration:none;color:inherit;
-  background:var(--panel);border:1px solid var(--line);overflow:hidden}
-.fill-card[hidden]{display:none}
-.fill-card .fill-img{width:100%;flex:1 1 auto;min-height:0;height:auto;object-fit:cover;opacity:0;transition:opacity .4s ease}
-.fill-card.ready .fill-img{opacity:1}
-.fill-card .fill-body{flex:0 0 auto;display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-top:1px solid var(--line)}
-.fill-badge{align-self:flex-start;font-size:11px;line-height:1;padding:4px 9px;border-radius:999px;
-  background:rgba(91,140,255,.14);color:var(--accent);border:1px solid rgba(91,140,255,.32)}
-.fill-title{font-size:14px;line-height:1.45;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.fill-meta{font-size:12px;color:var(--dim)}
-.fill-go{font-size:13px;color:var(--accent);margin-top:2px}
-.fill-card:hover{border-color:var(--accent)}
-.fill-card:hover .fill-img{opacity:.92}
 /* 原图直链（OpenList）：右上角小胶囊 */
 .orig-link{position:absolute;top:8px;right:8px;z-index:2;background:rgba(0,0,0,.62);color:#fff;font-size:12px;line-height:1;padding:6px 10px;border-radius:999px;text-decoration:none;opacity:.9;transition:opacity .2s,background .2s;backdrop-filter:blur(4px)}
 .orig-link:hover{opacity:1;background:var(--accent);color:#fff}
@@ -1057,93 +1034,83 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     }).catch(() => {});
   }
 
-  // 详情页：瀑布流
-  // 关键点：宽高比在构建时就写进 data-ratio，图片没加载也能算出最终高度 →
-  // 一次性把所有格子排完（与加载顺序无关），图片只负责淡入。
-  // 这样每次刷新的布局完全一致，也不会出现空洞 / 错行 / 高度乱跳。
+  // 详情页预览：行式铺满布局（每行 2~3 张，横向铺满整行，图片保持原比例不裁剪）
+  // 宽高比在构建时就写进 data-ratio → 不依赖图片加载，布局一次算完、刷新完全一致。
+  // 行组合用 DP 选：让每行高度尽量贴近目标高度，且不会剩下一张孤图。
   const gallery = document.getElementById('gallery');
   const loadedCount = document.getElementById('loadedCount');
   if (gallery) {
     const GAP = 16;
-    const MIN_COL = 300;          // 单列最小宽度（决定列数）
-    const BAND_HOLE = 140;        // 跨列时允许留下的空隙上限（小空隙靠错位消化）
-    const BAND_HOLE_LAST = 400;   // 最后一张横图放宽：空隙交给「猜你喜欢」填充卡补满
-    const MIN_FILL = 180;         // 填充卡最小高度，低于此值就不放了
-    const items = [...gallery.querySelectorAll('.preview:not(.fill-card)')];
-    const fillCard = gallery.querySelector('.fill-card');
-    let cols = 1, colW = 0;
+    const ROW_TARGET = ${JSON.stringify(config.previewRowTarget || 460)};   // 目标行高（site.json: previewRowTarget）
+    const ROW_MAX = ${JSON.stringify(Math.min(3, Math.max(2, config.previewRowMax || 3)))};   // 每行最多几张（site.json: previewRowMax，2~3）
+    const ROW_MIN_H = Math.round(ROW_TARGET * 0.42);    // 行高下限
+    const ROW_MAX_H = Math.round(ROW_TARGET * 1.45);    // 行高上限
+    const BIG_PENALTY = 900;
+    const items = [...gallery.querySelectorAll('.preview')];
+    let W = 0;
 
-    const metrics = () => {
-      const W = gallery.clientWidth || gallery.parentElement.clientWidth;
-      cols = Math.max(1, Math.min(4, Math.floor((W + GAP) / (MIN_COL + GAP))));
-      colW = (W - GAP * (cols - 1)) / cols;
-    };
-
-    // 按 DOM 顺序一次排完：短列优先；横构图尝试跨双列（跨列会留长条空隙时退回单列）
-    // 同时记录每个「跨列留下的空隙」，最后用填充卡把最大的一块补满 → 底部永远是齐的
-    const layout = () => {
-      metrics();
-      const hh = new Array(cols).fill(0);
-      const placed = [];
-      const gaps = [];
-      if (fillCard) { fillCard.hidden = true; fillCard.classList.remove('placed'); }
-      items.forEach((el, idx) => {
-        const ratio = parseFloat(el.dataset.ratio) || 0.75;
-        const isLast = idx === items.length - 1;
-        let span = (cols >= 2 && ratio >= 1.25) ? 2 : 1;
-        let col = 0, y = Infinity;
-        if (span === 2) {
-          for (let c = 0; c + 1 < cols; c++) {
-            const yy = Math.max(hh[c], hh[c + 1]);
-            if (yy < y) { y = yy; col = c; }
-          }
-          const single = Math.min(...hh);
-          const limit = isLast ? BAND_HOLE_LAST : BAND_HOLE;
-          if (y - single > limit) { span = 1; }   // 退回单列，避免跨列下方留长条空隙
-        }
-        if (span === 1) {
-          y = Math.min(...hh);
-          col = hh.indexOf(y);
-        } else {
-          for (let i = col; i < col + span && i < cols; i++) {
-            if (hh[i] < y) gaps.push({ col: i, y: hh[i], h: y - hh[i] });
-          }
-        }
-        const w = colW * span + GAP * (span - 1);
-        const h = Math.round(w / ratio);
-        el.style.width = w + 'px';
-        el.style.height = h + 'px';
-        el.style.transform = 'translate(' + (col * (colW + GAP)) + 'px, ' + y + 'px)';
-        el.classList.add('placed');
-        placed.push({ col, span, bottom: y + h });
-        for (let i = col; i < col + span && i < cols; i++) hh[i] = y + h + GAP;
-      });
-      // 列底：每列最后一张图的下边缘
-      const colEnd = new Array(cols).fill(0);
-      placed.forEach(o => { for (let i = o.col; i < o.col + o.span && i < cols; i++) colEnd[i] = Math.max(colEnd[i], o.bottom); });
-      const maxEnd = Math.max(...colEnd), minEnd = Math.min(...colEnd);
-      if (maxEnd - minEnd > 0) gaps.push({ col: colEnd.indexOf(minEnd), y: minEnd, h: maxEnd - minEnd, end: true });  // 末尾参差
-      // 用「猜你喜欢」卡把最大的一块空隙补满 → 底边与列齐平（同大小时优先补底部）
-      const score = g => g.h + (g.end ? 120 : 0);
-      const best = gaps.filter(g => g.h >= MIN_FILL).sort((a, b) => score(b) - score(a))[0];
-      if (fillCard && best) {
-        fillCard.style.width = colW + 'px';
-        fillCard.style.height = Math.round(best.h) + 'px';
-        fillCard.style.transform = 'translate(' + (best.col * (colW + GAP)) + 'px, ' + best.y + 'px)';
-        fillCard.hidden = false;
-        fillCard.classList.add('placed');
-        if (!fillCard.dataset.done) {
-          fillCard.dataset.done = '1';
-          const fi = fillCard.querySelector('.fill-img');
-          if (fi && fi.dataset.src) {
-            const real = new Image();
-            real.onload = () => { fi.src = real.src; fillCard.classList.add('ready'); };
-            real.src = fi.dataset.src;
-          } else if (fi) { fillCard.classList.add('ready'); }
+    // 把 items 按 2~ROW_MAX 张切成若干行：DP 求总代价最小的切法
+    const splitRows = () => {
+      const n = items.length;
+      const ratioAt = i => parseFloat(items[i].dataset.ratio) || 0.75;
+      const hOf = (i, k) => {
+        let s = 0;
+        for (let j = i; j < i + k; j++) s += ratioAt(j);
+        return (W - GAP * (k - 1)) / s;
+      };
+      const minTileW = Math.max(120, Math.min(200, W * 0.26));   // 单张太窄就扣分（窄屏自动放宽）
+      const cost = (i, k) => {
+        const h = hOf(i, k);
+        let c = Math.abs(h - ROW_TARGET);
+        if (h < ROW_MIN_H || h > ROW_MAX_H) c += BIG_PENALTY;
+        for (let j = i; j < i + k; j++) { if (ratioAt(j) * h < minTileW) { c += BIG_PENALTY; break; } }
+        return c;
+      };
+      const dp = new Array(n + 1).fill(Infinity), pick = new Array(n + 1).fill(0);
+      const minPer = W < 460 ? 1 : 2;    // 手机窄屏：允许单张一行（否则瓦片会缩到 100px 出头）
+      dp[n] = 0;
+      for (let i = n - 1; i >= 0; i--) {
+        for (let k = minPer; k <= ROW_MAX; k++) {
+          if (i + k > n) continue;
+          const c = cost(i, k) + dp[i + k];
+          if (c < dp[i]) { dp[i] = c; pick[i] = k; }
         }
       }
-      const total = hh.length ? Math.max(...hh) : 0;
-      gallery.style.height = Math.max(0, total - GAP) + 'px';
+      // 兜底：只剩 1 张（图集只有 1 张预览）时单独一行，铺满整行
+      if (!isFinite(dp[0])) {
+        const rows = [];
+        for (let i = 0; i < n; i += 2) rows.push({ i, k: Math.min(2, n - i) });
+        return rows;
+      }
+      const rows = [];
+      let i = 0;
+      while (i < n) { const k = pick[i]; rows.push({ i, k }); i += k; }
+      return rows;
+    };
+
+    const layout = () => {
+      W = gallery.clientWidth || gallery.parentElement.clientWidth;
+      if (!items.length || !W) return;
+      const rows = splitRows();
+      let y = 0;
+      rows.forEach(r => {
+        let sum = 0;
+        for (let j = 0; j < r.k; j++) sum += parseFloat(items[r.i + j].dataset.ratio) || 0.75;
+        const h = Math.round((W - GAP * (r.k - 1)) / sum);
+        let x = 0;
+        for (let j = 0; j < r.k; j++) {
+          const el = items[r.i + j];
+          // 最后一张吃掉取整误差 → 每一行都正好铺满整行
+          const w = (j === r.k - 1) ? (W - x) : Math.round((parseFloat(el.dataset.ratio) || 0.75) * h);
+          el.style.width = w + 'px';
+          el.style.height = h + 'px';
+          el.style.transform = 'translate(' + x + 'px, ' + y + 'px)';
+          el.classList.add('placed');
+          x += w + GAP;
+        }
+        y += h + GAP;
+      });
+      gallery.style.height = Math.max(0, y - GAP) + 'px';
     };
 
     // 图片加载：懒加载 + WebP 失败回退 JPG；只负责显示，不再改变落位（避免布局抖动）
@@ -1287,12 +1254,6 @@ function build() {
     const outDir = join(DIST, 'set', s.slug)
     mkdirSync(outDir, { recursive: true })
     const related = relatedSets(s, sets)
-    // 瀑布流底部空隙的填充卡：优先同系列 → 同模特 → 任意；不与「相关推荐」重复
-    const relSlugs = new Set(related.map(x => x.slug))
-    const fillPool = sets.filter(x => x.slug !== s.slug && !relSlugs.has(x.slug))
-    const fillSet = fillPool.find(x => s.series && x.series === s.series)
-      || fillPool.find(x => s.model && x.model === s.model)
-      || fillPool[0] || null
     // 模特的其他作品（侧栏推荐）：同系列优先，再按日期倒序，取 5 套
     const sameModel = s.model ? sets.filter(x => x.model === s.model && x.slug !== s.slug) : []
     const moreSets = sameModel.slice().sort((a, b) => {
@@ -1300,7 +1261,7 @@ function build() {
       const sb = (s.series && b.series === s.series) ? 0 : 1
       return sa - sb || String(b.date || '').localeCompare(String(a.date || ''))
     }).slice(0, config.modelSideCount || 5)
-    writeFileSync(join(outDir, 'index.html'), detailPage(s, sets[i - 1], sets[i + 1], pageUrl(`set/${encodeURIComponent(s.slug)}/`), related, byTag, fillSet, moreSets, sameModel.length + 1))
+    writeFileSync(join(outDir, 'index.html'), detailPage(s, sets[i - 1], sets[i + 1], pageUrl(`set/${encodeURIComponent(s.slug)}/`), related, byTag, moreSets, sameModel.length + 1))
 
     // 预览图（原图；精简模式下不复制，改用缩略图作为大图）
     const imgOut = join(outDir, 'images')
