@@ -711,6 +711,48 @@ function pullAiTags(){document.querySelectorAll('.chip-ai').forEach(b=>addTagVal
 document.addEventListener('DOMContentLoaded',()=>{const v=document.getElementById('tagsValue');if(v){TAGS=(v.value||'').split(',').map(s=>s.trim()).filter(Boolean);renderTags()}const ti=document.getElementById('tagInput');if(ti){ti.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();addTag()}})}initDrag()});
 function backfill(){toast('正在补齐缩略图…');fetch('/backfill',{method:'POST'}).then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),1200)}).catch(e=>toast('失败：'+e,false))}
 function dupCheck(){toast('正在比对全库内容…');fetch('/dupcheck',{method:'POST'}).then(r=>r.text()).then(t=>{alert(t);toast('检查完成',true)}).catch(e=>toast('失败：'+e,false))}
+// ── 以下为跨页面公共函数（编辑页/批量页/首页都会用到，必须放共享 JS，否则其他页面报 not defined）──
+const IMG_RE=/\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
+function readEntries(rd){return new Promise(res=>{const all=[];const step=()=>rd.readEntries(es=>{if(!es.length)return res(all);all.push(...es);step()});step()})}
+async function walkEntry(entry,acc){
+  if(!entry)return;
+  if(entry.isFile){acc.push(entry);return}
+  if(entry.isDirectory){for(const e of await readEntries(entry.createReader()))await walkEntry(e,acc)}
+}
+async function walkItems(items){
+  const entries=[];
+  for(const it of items){const en=it.webkitGetAsEntry&&it.webkitGetAsEntry();if(en)await walkEntry(en,entries)}
+  const out=[];
+  for(const en of entries){
+    if(!IMG_RE.test(en.name))continue;
+    const f=await new Promise(r=>en.file(r));
+    try{f.relPath=en.fullPath}catch(e){}
+    out.push(f);
+  }
+  return {files:out,rootName:(entries[0]&&entries[0].fullPath||'').split('/')[1]||''};
+}
+let dragEl=null;
+function initDrag(){
+  const box=document.getElementById('thumbs');if(!box)return;
+  box.querySelectorAll('.thumb').forEach(el=>{
+    el.addEventListener('dragstart',e=>{dragEl=el;el.style.opacity='.4';e.dataTransfer.effectAllowed='move'});
+    el.addEventListener('dragend',()=>{el.style.opacity='';reindex()});
+    el.addEventListener('dragover',e=>{
+      e.preventDefault();if(!dragEl||dragEl===el)return;
+      const r=el.getBoundingClientRect();
+      const after=(e.clientX-r.left)>r.width/2;
+      box.insertBefore(dragEl,after?el.nextSibling:el);
+    });
+  });
+}
+function reindex(){document.querySelectorAll('#thumbs .thumb').forEach((el,i)=>{const b=el.querySelector('.badge');if(b)b.textContent=i+1})}
+function saveOrder(slug){
+  const order=[...document.querySelectorAll('#thumbs .thumb')].map(el=>el.dataset.img);
+  toast('正在重排文件…');
+  fetch('/reorder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug,order})})
+    .then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),1200)}).catch(e=>toast('失败：'+e,false));
+}
+function resetOrder(){location.reload()}
 """
 
 
@@ -1081,6 +1123,18 @@ TAG_SYNONYMS = [
     {'古典', '古风', '国风'},
     {'长发', '长头发'}, {'短发', '短头发'},
     {'性感', '妩媚'}, {'甜美', '甜系'},
+    # 暗色/色调类
+    {'暗黑系', '黑色系', '暗调', '暗色调', '暗色系', '黑色调'},
+    {'暖色调', '暖色', '暖光', '暖调'}, {'冷色调', '冷色', '冷光', '冷调'},
+    {'柔和光线', '柔和色调', '柔光', '柔光色调'},
+    # 常见重复
+    {'居家', '家居'}, {'室内', '室内拍摄', '室内摄影', '室内照', '室内布景'},
+    {'日系', '日系风', '日系风格', '日本风'},
+    {'欧美', '欧美风', '欧美风格'}, {'韩系', '韩式', '韩系风格', '韩风'},
+    {'清新', '小清新'}, {'复古', '复古风', '复古风格'},
+    {'简约', '简约风', '简约风格', '极简', '极简风'},
+    {'青春', '青春活力', '青春感'}, {'温馨', '温馨氛围', '温暖氛围'},
+    {'美食', '食物'}, {'泳池', '游泳池', '泳池边', '泳池拍摄'},
 ]
 
 
@@ -1314,25 +1368,7 @@ function applyFolder(fs,rootName){
   }else{toast('这个文件夹里没有图片',false)}
   show();
 }
-// 递归读取拖入的文件夹（DataTransferItem → FileSystemEntry）
-function readEntries(rd){return new Promise(res=>{const all=[];const step=()=>rd.readEntries(es=>{if(!es.length)return res(all);all.push(...es);step()});step()})}
-async function walkEntry(entry,acc){
-  if(!entry)return;
-  if(entry.isFile){acc.push(entry);return}
-  if(entry.isDirectory){for(const e of await readEntries(entry.createReader()))await walkEntry(e,acc)}
-}
-async function walkItems(items){
-  const entries=[];
-  for(const it of items){const en=it.webkitGetAsEntry&&it.webkitGetAsEntry();if(en)await walkEntry(en,entries)}
-  const out=[];
-  for(const en of entries){
-    if(!IMGRE.test(en.name))continue;
-    const f=await new Promise(r=>en.file(r));
-    try{f.relPath=en.fullPath}catch(e){}
-    out.push(f);
-  }
-  return {files:out,rootName:(entries[0]&&entries[0].fullPath||'').split('/')[1]||''};
-}
+// 递归读取拖入的文件夹：readEntries / walkEntry / walkItems 已移到共享 JS
 function show(){files.innerHTML=chosen.map((f,i)=>'<div>'+(i+1)+'. '+f.name+' · '+(f.size/1048576).toFixed(2)+'MB</div>').join('');document.getElementById('submit').textContent=chosen.length?('上传 '+chosen.length+' 张并生成站点'):'上传并生成站点'}
 mk.onchange=()=>{pc.disabled=!mk.checked;if(!mk.checked){cf.value='';cn.textContent=''}};
 pc.onclick=()=>cf.click();cf.onchange=()=>{cn.textContent=cf.files[0]?cf.files[0].name:'（未选）'};
@@ -1366,29 +1402,6 @@ function bulkSetSeries(){const v=document.getElementById('bulkSeries').value.tri
 function bulkAddTags(){const v=document.getElementById('bulkTags').value.trim();if(!v){toast('请填写标签',false);return}bulkSend('addTags',{value:v})}
 function bulkAutoTag(){bulkSend('autotag',{},'对选中图集批量 AI 打标')}
 function bulkDelete(){bulkSend('delete',{},'删除选中图集（不可恢复）')}
-// ── 图片拖拽排序 ──
-let dragEl=null;
-function initDrag(){
-  const box=document.getElementById('thumbs');if(!box)return;
-  box.querySelectorAll('.thumb').forEach(el=>{
-    el.addEventListener('dragstart',e=>{dragEl=el;el.style.opacity='.4';e.dataTransfer.effectAllowed='move'});
-    el.addEventListener('dragend',()=>{el.style.opacity='';reindex()});
-    el.addEventListener('dragover',e=>{
-      e.preventDefault();if(!dragEl||dragEl===el)return;
-      const r=el.getBoundingClientRect();
-      const after=(e.clientX-r.left)>r.width/2;
-      box.insertBefore(dragEl,after?el.nextSibling:el);
-    });
-  });
-}
-function reindex(){document.querySelectorAll('#thumbs .thumb').forEach((el,i)=>{const b=el.querySelector('.badge');if(b)b.textContent=i+1})}
-function saveOrder(slug){
-  const order=[...document.querySelectorAll('#thumbs .thumb')].map(el=>el.dataset.img);
-  toast('正在重排文件…');
-  fetch('/reorder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug,order})})
-    .then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),1200)}).catch(e=>toast('失败：'+e,false));
-}
-function resetOrder(){location.reload()}
 // ── 封面裁剪选择器（可视化拖拽 3:4 选区） ──
 let CROP={slug:'',img:'',x:0,y:0,w:0,h:0,natW:0,natH:0,dispW:0,dispH:0};
 function openCropper(slug){
