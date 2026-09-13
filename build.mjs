@@ -282,6 +282,15 @@ function readSet(slug) {
     model,
     date,
     addedAt,
+    // 置顶推荐：pinned + 可选 pinOrder（多套先后）/ pinUntil（到期自动失效）
+    pinned: (() => {
+      if (!meta.pinned) return false
+      const until = String(meta.pinUntil || '').trim()
+      if (until && /^\d{4}-\d{2}-\d{2}$/.test(until) && until < new Date().toISOString().slice(0, 10)) return false
+      return true
+    })(),
+    pinOrder: Number(meta.pinOrder) || 0,
+    pinUntil: meta.pinUntil || '',
     tags: meta.tags || [],
     description: meta.description || '',
     password: meta.password || '',
@@ -442,6 +451,7 @@ const card = (s, rel = '') => `
         : `<div class="no-cover">无封面</div>`}
       <span class="badge">${s.imageCount}P</span>
       ${s.sizeText ? `<span class="badge badge-size" title="原图总大小 ${esc(s.sizeText)}">${esc(s.sizeText)}</span>` : (s.packSize ? `<span class="badge badge-size">${esc(s.packSize)}</span>` : '')}
+      ${s.pinned ? '<span class="badge badge-pin" title="置顶推荐">📌 置顶</span>' : ''}
     </div>
     <h2 class="card-title">${esc(s.title)}</h2>
   </a>
@@ -485,15 +495,41 @@ function pagerHtml(page, totalPages, hrefOf) {
   </nav>`
 }
 
-function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets = null) {
+/** 置顶推荐轮播（列表页顶部；没有置顶图集时返回空串，页面自动退回标题样式） */
+function heroHtml(pinned, rel = '') {
+  if (!pinned.length) return ''
+  const slides = pinned.map(s => `
+    <a class="hero-slide" href="${rel}set/${s.slug}/index.html" aria-label="${esc(s.title)}">
+      ${s.coverFile ? `<img src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="${esc(s.title)}"${pinned.indexOf(s) ? ' loading="lazy"' : ''}>` : ''}
+      <span class="hero-info">
+        <span class="hero-badge">📌 置顶推荐</span>
+        <h2>${esc(s.title)}</h2>
+        <span class="hero-meta">${[s.model, `${s.imageCount} 张`, s.sizeText, s.tags.slice(0, 3).join(' · ')].filter(Boolean).map(esc).join(' ｜ ')}</span>
+        <span class="hero-cta">查看图集 →</span>
+      </span>
+    </a>`).join('')
+  const dots = pinned.length > 1
+    ? `<div class="hero-dots">${pinned.map((_, i) => `<button class="hero-dot${i ? '' : ' on'}" aria-label="第 ${i + 1} 张"></button>`).join('')}</div>`
+    : ''
+  const nav = pinned.length > 1
+    ? `<button class="hero-nav hero-prev" aria-label="上一张">‹</button><button class="hero-nav hero-next" aria-label="下一张">›</button>`
+    : ''
+  return `<section class="hero" id="hero" aria-label="置顶推荐">
+    <div class="hero-track">${slides}</div>${nav}${dots}
+  </section>`
+}
+
+function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets = null, pinned = []) {
   // 站内总张数与总体量（整站口径，跟分页无关）
   const siteList = allSets || sets
   const siteBytes = siteList.reduce((n, s) => n + (s.bytes || 0), 0)
   const siteCount = siteList.reduce((n, s) => n + (s.imageCount || 0), 0)
   const siteBits = `共 ${total} 套${siteBytes ? ` · ${siteCount} 张 · 合计 <b class="size-strong">${esc(fmtSize(siteBytes))}</b>` : ''}${totalPages > 1 ? ` · 第 ${page} / ${totalPages} 页（本页 ${sets.length} 套）` : ''}`
+  const hasHero = page === 1 && pinned.length > 0
   const body = `
-  <div class="page-head" data-site-bits="${esc(siteBits)}">
-    <h1>全部图集</h1>
+  ${hasHero ? heroHtml(pinned, rel) : ''}
+  <div class="page-head" data-site-bits="${esc(siteBits)}"${hasHero ? ' data-hide-title="1"' : ''}>
+    ${hasHero ? '' : '<h1>全部图集</h1>'}
     <p class="sub">${siteBits}</p>
   </div>
   <div class="filters" id="filters">
@@ -917,7 +953,32 @@ img{max-width:100%;display:block}
 .to-top{position:fixed;right:22px;bottom:26px;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);
   background:var(--panel);color:var(--fg);font-size:18px;cursor:pointer;z-index:30;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .to-top:hover{border-color:var(--accent)}
-/* 分页组件（Bootstrap 5 分页规范：.pagination/.page-item/.page-link/.active/.disabled） */
+/* 置顶推荐轮播（列表页顶部） */
+.hero{position:relative;margin:18px 0 16px;border-radius:14px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
+.hero-track{position:relative;aspect-ratio:16/6;min-height:180px}
+.hero-slide{position:absolute;inset:0;display:block;opacity:0;transition:opacity .55s ease;text-decoration:none;color:#fff;pointer-events:none}
+.hero-slide.on{opacity:1;pointer-events:auto}
+.hero-slide img{width:100%;height:100%;object-fit:cover;display:block}
+.hero-slide::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,0,0,.8) 0%,rgba(0,0,0,.45) 48%,rgba(0,0,0,.1) 100%)}
+.hero-info{position:absolute;left:22px;right:22px;bottom:20px;z-index:2;display:flex;flex-direction:column;gap:7px;align-items:flex-start}
+.hero-badge{background:rgba(255,180,84,.92);color:#1a1206;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px}
+.hero-info h2{margin:0;font-size:22px;line-height:1.35;text-shadow:0 2px 12px rgba(0,0,0,.55)}
+.hero-meta{color:rgba(255,255,255,.86);font-size:13px;text-shadow:0 1px 8px rgba(0,0,0,.5)}
+.hero-cta{background:var(--accent);color:#fff;padding:7px 16px;border-radius:999px;font-size:13px;margin-top:2px}
+.hero-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:36px;height:36px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.35);background:rgba(0,0,0,.45);color:#fff;font-size:18px;line-height:1;cursor:pointer;backdrop-filter:blur(4px)}
+.hero-nav:hover{background:rgba(0,0,0,.7)}
+.hero-prev{left:12px}.hero-next{right:12px}
+.hero-dots{position:absolute;right:16px;bottom:18px;z-index:3;display:flex;gap:6px}
+.hero-dot{width:8px;height:8px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.45);cursor:pointer}
+.hero-dot.on{background:#fff;width:20px;border-radius:999px}
+@media (max-width:700px){
+  .hero-track{aspect-ratio:4/3}
+  .hero-info{left:14px;right:14px;bottom:14px}
+  .hero-info h2{font-size:17px}
+  .hero-prev,.hero-next{display:none}
+}
+.badge-pin{left:8px;top:auto;bottom:8px;background:rgba(255,180,84,.92);color:#1a1206;font-weight:600}
 .pagination-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;margin:30px 0 10px}
 .pagination-wrap[hidden]{display:none}   /* CSS 的 display 会盖掉 hidden 属性，必须显式声明 */
 .pagination{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0;padding:0;justify-content:center}
@@ -1160,6 +1221,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       (s.cover ? '<img loading="lazy" src="' + base + s.cover + '" alt="' + esc(s.title) + '">' : '<div class="no-cover">无封面</div>'),
       '<span class="badge">' + s.imageCount + 'P</span>',
       (s.size || s.packSize ? '<span class="badge badge-size">' + esc(s.size || s.packSize) + '</span>' : ''),
+      (s.pinned ? '<span class="badge badge-pin" title="置顶推荐">📌 置顶</span>' : ''),
       '</div>',
       '<h2 class="card-title">' + esc(s.title) + '</h2>',
       '</a>',
@@ -1246,12 +1308,15 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         const list = all.slice((curPage - 1) * PER, curPage * PER);
         grid.innerHTML = list.map(cardHtml).join('');
         const head = document.querySelector('.page-head');
+        const hero = document.getElementById('hero');
+        if (hero) hero.hidden = !!q;                       // 搜索/筛选时先收起推荐轮播
+        const noTitle = head && head.dataset.hideTitle === '1';
         if (head) {
           // 标题保持中性（下面有排序选择器，"最新图集"会自相矛盾）；排序条件写在副标题里
           const sortLabel = sortSel && sortSel.options[sortSel.selectedIndex] ? sortSel.options[sortSel.selectedIndex].textContent.trim() : '';
           const isDefaultSort = !sortSel || sortSel.value === 'date-desc';
           const siteBits = (head.dataset.siteBits || '');
-          head.innerHTML = '<h1>' + (q ? '搜索结果' : '全部图集') + '</h1><p class="sub">'
+          head.innerHTML = (q || noTitle ? (q ? '<h1>搜索结果</h1>' : '') : '<h1>全部图集</h1>') + '<p class="sub">'
             + (q ? '匹配「' + esc(q) + '」共 ' + all.length + ' 套' + (isDefaultSort ? '' : ' · ' + esc(sortLabel))
                  + ' · <a href="' + base + 'index.html" class="dim">清除筛选</a>'
                  : siteBits + (isDefaultSort ? '' : ' · <span class="dim">按' + esc(sortLabel) + '</span>')) + '</p>';
@@ -1301,6 +1366,39 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       if (toTop) {
         window.addEventListener('scroll', () => { toTop.hidden = window.scrollY < 600; }, { passive: true });
         toTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+      }
+      // 置顶推荐轮播：自动播放 5s，悬停暂停，支持箭头/圆点/触摸滑动
+      const heroBox = document.getElementById('hero');
+      if (heroBox) {
+        const slides = [...heroBox.querySelectorAll('.hero-slide')];
+        const dots = [...heroBox.querySelectorAll('.hero-dot')];
+        if (slides.length > 1) {
+          let hi = 0, ht = null;
+          const show = (i) => {
+            hi = (i + slides.length) % slides.length;
+            slides.forEach((el, k) => el.classList.toggle('on', k === hi));
+            dots.forEach((el, k) => el.classList.toggle('on', k === hi));
+          };
+          const stop = () => { if (ht) { clearInterval(ht); ht = null; } };
+          const play = () => { stop(); ht = setInterval(() => show(hi + 1), 5000); };
+          const jump = (i) => { show(i); play(); };
+          heroBox.querySelector('.hero-prev').addEventListener('click', () => jump(hi - 1));
+          heroBox.querySelector('.hero-next').addEventListener('click', () => jump(hi + 1));
+          dots.forEach((el, k) => el.addEventListener('click', () => jump(k)));
+          heroBox.addEventListener('mouseenter', stop);
+          heroBox.addEventListener('mouseleave', play);
+          let hx = null;
+          heroBox.addEventListener('touchstart', (e) => { hx = e.touches[0].clientX; stop(); }, { passive: true });
+          heroBox.addEventListener('touchend', (e) => {
+            if (hx === null) return;
+            const dx = e.changedTouches[0].clientX - hx;
+            if (Math.abs(dx) > 40) show(hi + (dx < 0 ? 1 : -1));
+            hx = null; play();
+          }, { passive: true });
+          show(0); play();
+        } else if (slides.length === 1) {
+          slides[0].classList.add('on');           // 只有一条置顶：不轮播，静态展示
+        }
       }
       // 函数都就位了，现在才安全地按 URL 里的 ?q= 渲染初始结果
       if (q0) renderList(q0.toLowerCase());
@@ -1609,6 +1707,9 @@ function build() {
   const slugs = readdirSync(SETS_DIR).filter(name => statSync(join(SETS_DIR, name)).isDirectory())
   const sets = slugs.map(readSet).filter(Boolean)
     .sort((a, b) => cmpDateDesc(a, b))
+  // 置顶推荐（列表页顶部轮播）：按 pinOrder 升序，没填的排在后面并按日期
+  const pinnedSets = sets.filter(s => s.pinned)
+    .sort((a, b) => (a.pinOrder || 9999) - (b.pinOrder || 9999) || cmpDateDesc(a, b))
   if (!sets.length) console.warn('! sets/ 下没有有效图集（每个图集目录需含 meta.json）')
   // ★ 先把样式/脚本落盘：后面复制缩略图要花几十秒，万一构建被打断（关掉后台、重启进程等），
   //   至少页面还是有样式的。曾经的坑：assets 放在最后写，构建中途被杀 → 全站裸奔无 CSS。
@@ -1622,7 +1723,7 @@ function build() {
     // 分页页在 dist/page/N.html，比首页深一层 → 相对路径只用一级 ../
     // （原来写的 ../../ 靠浏览器"不能上到域名之上"夹住才没出错，路径本身是错的）
     const rel = p === 1 ? '' : '../'
-    const html = listPage(pageSets, p, totalPages, rel, sets.length, sets)
+    const html = listPage(pageSets, p, totalPages, rel, sets.length, sets, pinnedSets)
     if (p === 1) writeFileSync(join(DIST, 'index.html'), html)
     else { mkdirSync(join(DIST, 'page'), { recursive: true }); writeFileSync(join(DIST, `page/${p}.html`), html) }
   }
@@ -1799,6 +1900,7 @@ function build() {
       slug: s.slug, title: s.title, displayTitle: s.displayTitle,
       series: s.series, model: s.model, date: s.date, addedAt: s.addedAt, tags: s.tags,
       imageCount: s.imageCount, packSize: s.packSize, size: s.sizeText, bytes: s.bytes,
+      pinned: !!s.pinned, pinOrder: s.pinOrder || 0,
       cover: s.coverThumb ? `set/${s.slug}/thumbs/${s.coverThumb}${verQ(s.thumbVer[s.coverThumb])}` : (s.coverFile ? `set/${s.slug}/${s.coverFile}` : ''),
     })),
   }, null, 2))

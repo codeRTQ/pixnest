@@ -478,6 +478,61 @@ def log_line(kind, text):
         pass
 
 
+def rebuild_wait(timeout=180):
+    """等正在进行的发布结束后再重建。
+    否则连续两次内容改动（比如连点两下置顶）会碰上"发布中禁止重建"，
+    第二次的改动就只写进了 meta、页面没更新。"""
+    t0 = time.time()
+    while _pub['running'] and time.time() - t0 < timeout:
+        time.sleep(1.5)
+    return rebuild()
+
+
+def set_pin(slug, pinned=None, order=None, until=None):
+    """置顶推荐：开关 / 排序 / 到期日。pinned=True 且没给 order 时自动排到最后一位。"""
+    d = os.path.join(SETS_DIR, slug)
+    if not os.path.isdir(d):
+        return False, '图集不存在'
+    meta = read_meta(d)
+    if pinned is not None:
+        meta['pinned'] = bool(pinned)
+    if order is not None:
+        try:
+            meta['pinOrder'] = int(order)
+        except Exception:  # noqa
+            pass
+    if until is not None:
+        until = str(until).strip()
+        if until:
+            meta['pinUntil'] = until
+        else:
+            meta.pop('pinUntil', None)
+    if meta.get('pinned') and not meta.get('pinOrder'):
+        used = []
+        for s in list_sets():
+            if s['slug'] == slug:
+                continue
+            om = read_meta(os.path.join(SETS_DIR, s['slug']))
+            if om.get('pinned'):
+                used.append(int(om.get('pinOrder') or 0))
+        meta['pinOrder'] = (max(used) + 1) if used else 1
+    if not meta.get('pinned'):
+        meta.pop('pinOrder', None)
+        meta.pop('pinUntil', None)
+    save_meta(d, meta)
+    title = meta.get('title') or slug
+    today = date.today().isoformat()
+    n = 0
+    for s in list_sets():
+        om = read_meta(os.path.join(SETS_DIR, s['slug']))
+        if om.get('pinned') and not (om.get('pinUntil') and str(om['pinUntil']) < today):
+            n += 1   # 只数还没到期的
+    if meta.get('pinned'):
+        extra = f'（第 {meta.get("pinOrder")} 位' + (f'，置顶到 {meta["pinUntil"]}' if meta.get('pinUntil') else '') + '）'
+        return True, f'✓ 已置顶「{title}」{extra}，当前共 {n} 套置顶'
+    return True, f'✓ 已取消置顶「{title}」，当前共 {n} 套置顶'
+
+
 def after_tagging(tagged):
     """打标跑完后的收尾：重建站点；开启自动发布时再同步到线上。
     没有这一步，标签只写进了 sets/*/meta.json，页面（本地 8090 与线上）都不会变。
@@ -962,6 +1017,10 @@ table.lk tr.bad td{color:#ff8a8a}
   font-family:ui-monospace,Consolas,monospace;color:var(--fg)}
 .set .pick{position:absolute;top:8px;right:8px;width:20px;height:20px;cursor:pointer;z-index:2}
 .set{position:relative}
+/* 置顶标记：卡片左上角金标，带序号（第几位置顶） */
+.pinbadge{position:absolute;left:8px;top:8px;z-index:3;background:rgba(255,180,84,.94);color:#1a1206;
+  font-size:11px;font-weight:700;line-height:1;padding:4px 7px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.sets[data-view="list"] .pinbadge{position:static;margin-right:2px}
 .set.picked{outline:2px solid var(--accent)}
 /* 封面裁剪器 */
 .cropper{position:fixed;inset:0;z-index:200;background:rgba(8,10,14,.96);overflow:auto;padding:20px}
@@ -1024,8 +1083,14 @@ function del(slug){
     .then(function(t){toast(t,true);setTimeout(function(){location.href='/'},1000)})
     .catch(function(e){toast('删除失败：'+(e.message||e)+'（图集未受影响）',false)});
 }
-function purgeTrash(){
-  if(!confirm('清空回收站 _trash/ ？\\n\\n里面是之前删除的图集，清空后无法恢复。'))return;
+function togglePin(slug,on){
+  toast((on?'正在置顶 ':'正在取消置顶 ')+slug+' …');
+  fetch('/pin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug:slug,pinned:!!on})})
+    .then(function(r){return r.text().then(function(t){if(!r.ok)throw new Error(t);return t})})
+    .then(function(t){toast(t,true);setTimeout(function(){location.reload()},1200)})
+    .catch(function(e){toast('操作失败：'+(e.message||e),false)});
+}
+function purgeTrash(){  if(!confirm('清空回收站 _trash/ ？\\n\\n里面是之前删除的图集，清空后无法恢复。'))return;
   toast('正在清空回收站…');
   fetch('/purge-trash',{method:'POST'})
     .then(function(r){return r.text().then(function(t){if(!r.ok)throw new Error(t);return t})})
@@ -1215,14 +1280,19 @@ def sets_cards(sets, view='card'):
         title = (m.get('title') or s['slug'])
         size = fmt_size(set_dir_size(os.path.join(SETS_DIR, s['slug'])))
         search = f"{title} {s['slug']} {m.get('model') or ''} {' '.join(m.get('tags') or [])}".lower()
+        pin_badge = (f'<span class="pinbadge" title="置顶第 {m.get("pinOrder") or "-"} 位'
+                     + (f'，到 {m["pinUntil"]} 失效' if m.get('pinUntil') else '') + '">📌'
+                     + (str(m.get('pinOrder')) if m.get('pinOrder') else '') + '</span>') if m.get('pinned') else ''
         cards.append(f"""<div class="set" data-slug="{s['slug']}" data-search="{esc_attr(search)}"
              onclick="location.href='/edit?slug={quote(s['slug'])}'" title="点击编辑这套图集">
-          <input type="checkbox" class="pick" data-slug="{s['slug']}" onclick="event.stopPropagation();togglePick(this)" title="选择用于批量操作">{img}<div class="body">
+          <input type="checkbox" class="pick" data-slug="{s['slug']}" onclick="event.stopPropagation();togglePick(this)" title="选择用于批量操作">{pin_badge}{img}<div class="body">
           <div class="t">{title}</div>
           <div class="m">{m.get('date','')} · {s['count']}P{(' · ' + size) if size else ''}{' · 含压缩包' if s['hasPack'] else ''}{(' · ' + str(m.get('model'))) if m.get('model') else ''}</div>
           <div class="acts">
             <a class="mini" href="/edit?slug={quote(s['slug'])}" onclick="event.stopPropagation()">编辑</a>
             <a class="mini" href="http://127.0.0.1:8090/set/{quote(s['slug'])}/index.html" target="_blank" onclick="event.stopPropagation()">预览</a>
+            <button class="mini" onclick="event.stopPropagation();togglePin('{s['slug']}',{0 if m.get('pinned') else 1})"
+                    title="置顶后出现在首页顶部推荐轮播">{"取消置顶" if m.get("pinned") else "📌 置顶"}</button>
             <button class="mini" onclick="event.stopPropagation();del('{s['slug']}')">删除</button>
           </div></div></div>""")
     return ''.join(cards) or '<p class="sub">没有匹配的图集</p>'
@@ -2354,6 +2424,14 @@ def edit_page(slug, msg=''):
       <div><label>展示的预览图数量</label><input type="text" name="previewCount" value="{m.get('previewCount','')}" placeholder="留空=默认 8 或全部"></div>
       <div><label>日期</label><input type="date" name="date" value="{m.get('date','')}"></div>
     </div>
+    <div><label style="margin-top:12px">置顶推荐（勾选后出现在首页顶部轮播）</label></div>
+    <div class="grid2">
+      <div><label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" name="pinned" value="1" style="width:auto"{" checked" if m.get('pinned') else ""}> 置顶推荐
+      </label></div>
+      <div><label>置顶顺序（1 在最前，留空自动排到最后）</label><input type="number" min="1" name="pinOrder" value="{m.get('pinOrder','')}"></div>
+      <div><label>置顶到期日（留空=长期有效，到期自动从轮播撤下）</label><input type="date" name="pinUntil" value="{m.get('pinUntil','')}"></div>
+    </div>
     <div><label style="margin-top:12px">模特资料（选填 · 填了才在详情页展示 · AI 不会自动生成这些）</label></div>
     <div class="grid2">
       <div><label>出生</label><input type="text" name="p_birth" value="{pf.get('birth','')}" placeholder="如 1998"></div>
@@ -2793,6 +2871,19 @@ class Handler(BaseHTTPRequestHandler):
             d = self._json_body()
             started, msg = autotag_batch_start(force=bool(d.get('force')), limit=int(d.get('limit') or 0))
             return self._json({'started': started, 'msg': msg}, 200 if started else 409)
+        if u.path == '/pin':
+            d = self._json_body()
+            ok, msg = set_pin(d.get('slug'), d.get('pinned'),
+                              d.get('order'), d.get('until', None) if 'until' in d else None)
+            if not ok:
+                return self._text('✗ ' + msg, 400)
+            okb, out = rebuild_wait()
+            first = next((l for l in (out or '').splitlines() if l.strip()), '')
+            msg += '\n  ' + ('✓ 站点已重建：' + first if okb else '✗ 重建失败：' + (out or '')[:160])
+            if okb and TAG_AUTOPUBLISH:
+                started, pmsg = publish_start()
+                msg += '\n  🚀 ' + pmsg
+            return self._text(msg)
         if u.path == '/model-rename':
             d = self._json_body()
             ok, msg = rename_model(d.get('from', ''), d.get('to', ''))
@@ -3087,6 +3178,22 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         elif 'previewCount' in meta:
             del meta['previewCount']
+        # 置顶推荐：勾选状态 / 顺序 / 到期日
+        if g('pinned') in ('1', 'on', 'true'):
+            meta['pinned'] = True
+            try:
+                if g('pinOrder'):
+                    meta['pinOrder'] = max(1, int(g('pinOrder')))
+            except ValueError:
+                pass
+            if g('pinUntil'):
+                meta['pinUntil'] = g('pinUntil')
+            else:
+                meta.pop('pinUntil', None)
+        else:
+            meta.pop('pinned', None)
+            meta.pop('pinOrder', None)
+            meta.pop('pinUntil', None)
         # 图片像素：自动检测为准（表单留空即自动；手填则作为兜底）
         res_txt, res_info = detect_resolution(set_dir)
         if res_txt:
