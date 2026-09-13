@@ -989,12 +989,13 @@ img{max-width:100%;display:block}
 .hero-dots{position:absolute;right:18px;bottom:14px;z-index:3;display:flex;gap:6px}
 .hero-dot{width:8px;height:8px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.45);cursor:pointer}
 .hero-dot.on{background:#fff;width:20px;border-radius:999px}
-/* 右侧置顶清单：高度锁定与轮播齐平、置顶再多也只在内部滚动，不会把版面撑长 */
+/* 右侧置顶清单：高度锁定与轮播齐平、置顶再多也只在内部滚动，不会把版面撑长
+   滚动条隐藏（用滚轮/悬停切换），选中项始终居中 */
 .hero-list{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;min-height:0;align-self:stretch}
-.hero-list-inner{position:absolute;inset:12px;overflow-y:auto;overscroll-behavior:contain;
-  scrollbar-width:thin;scrollbar-color:var(--line) transparent;display:flex;flex-direction:column;gap:4px;padding-right:2px}
-.hero-list-inner::-webkit-scrollbar{width:6px}
-.hero-list-inner::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+.hero-list-inner{position:absolute;inset:12px;overflow-y:auto;overscroll-behavior:contain;scroll-behavior:smooth;
+  display:flex;flex-direction:column;gap:4px;padding-right:2px;
+  scrollbar-width:none;-ms-overflow-style:none}
+.hero-list-inner::-webkit-scrollbar{width:0;height:0;display:none}
 .hero-list h3{margin:0 0 8px;font-size:13px;color:var(--accent2);font-weight:600;position:sticky;top:0;
   background:var(--panel);padding-bottom:6px;z-index:2}
 .hero-item{display:flex;gap:10px;align-items:center;padding:6px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
@@ -1408,13 +1409,31 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         const slides = [...heroBox.querySelectorAll('.hero-slide')];
         const dots = [...heroBox.querySelectorAll('.hero-dot')];
         const items = [...heroBox.querySelectorAll('.hero-item')];
+        const listInner = heroBox.querySelector('.hero-list-inner');
+        // 选中项始终滚到可视区正中间（清单比轮播高时才有意义）
+        const centerItem = (k) => {
+          const el = items[k];
+          if (!el || !listInner || listInner.scrollHeight <= listInner.clientHeight + 2) return;
+          const cr = listInner.getBoundingClientRect(), er = el.getBoundingClientRect();
+          const delta = (er.top - cr.top) - (cr.height / 2 - er.height / 2);
+          listInner.scrollTo({ top: listInner.scrollTop + delta, behavior: 'smooth' });
+        };
+        // 滚轮：只滚清单本身（不带动页面），每次一格匀速
+        if (listInner) {
+          listInner.addEventListener('wheel', (e) => {
+            if (listInner.scrollHeight <= listInner.clientHeight + 2) return;   // 没得滚就交给页面
+            e.preventDefault();
+            listInner.scrollTop += e.deltaY;
+          }, { passive: false });
+        }
         if (slides.length > 1) {
           let hi = 0, ht = null;
-          const show = (i) => {
+          const show = (i, center) => {
             hi = (i + slides.length) % slides.length;
             slides.forEach((el, k) => el.classList.toggle('on', k === hi));
             dots.forEach((el, k) => el.classList.toggle('on', k === hi));
             items.forEach((el, k) => el.classList.toggle('on', k === hi));
+            if (center !== false) centerItem(hi);
           };
           const stop = () => { if (ht) { clearInterval(ht); ht = null; } };
           const play = () => { stop(); ht = setInterval(() => show(hi + 1), 5000); };
@@ -1422,8 +1441,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
           heroBox.querySelector('.hero-prev').addEventListener('click', () => jump(hi - 1));
           heroBox.querySelector('.hero-next').addEventListener('click', () => jump(hi + 1));
           dots.forEach((el, k) => el.addEventListener('click', () => jump(k)));
-          // 右侧清单：点标题进图集，点缩略图切换当前轮播
-          items.forEach((el, k) => el.addEventListener('mouseenter', () => show(k)));
+          items.forEach((el, k) => el.addEventListener('mouseenter', () => { show(k); centerItem(k); }));
           heroBox.addEventListener('mouseenter', stop);
           heroBox.addEventListener('mouseleave', play);
           let hx = null;
@@ -1434,7 +1452,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
             if (Math.abs(dx) > 40) show(hi + (dx < 0 ? 1 : -1));
             hx = null; play();
           }, { passive: true });
-          show(0); play();
+          show(0, false); play();
         }
       }
       // 函数都就位了，现在才安全地按 URL 里的 ?q= 渲染初始结果
