@@ -433,6 +433,11 @@ table.lk{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
 table.lk th,table.lk td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
 table.lk th{color:var(--dim);font-weight:500;white-space:nowrap}
 table.lk tr.bad td{color:#ff8a8a}
+/* 批量导入：本次导入区块 */
+.imp{border:1px solid var(--accent);border-radius:12px;padding:14px 16px;margin:12px 0;background:rgba(91,140,255,.07)}
+.imp-title{font-weight:600;margin-bottom:10px;color:var(--accent)}
+.imp label{font-size:13px}
+.hint{color:var(--dim);font-weight:400;font-size:12px}
 .set .pick{position:absolute;top:8px;right:8px;width:20px;height:20px;cursor:pointer;z-index:2}
 .set{position:relative}
 .set.picked{outline:2px solid var(--accent)}
@@ -629,21 +634,27 @@ def batch_page():
 <div class="panel">
   <h2>批量导入多个文件夹</h2>
   <p class="sub">
-    <b>用法</b>：点「选择父文件夹」选中<b>装着多套图集的上一级目录</b>（如 <code>许岚</code>），
-    或直接把多个文件夹拖进来 —— 每个子文件夹会被识别成一套图集。<br>
-    标题默认取<b>文件夹名</b>（若填了「模特」，会自动把文件夹名开头的模特名去掉），生成后可在列表里逐个手动编辑。
+    <b>按模特 / 系列批量导入</b>：每次导入先填这次的<b>模特</b>或<b>系列</b>（会套用到本批全部图集），
+    再选中该模特（或系列）目录 —— 里面每个子文件夹自动成为一套图集。<br>
+    标题默认取文件夹名（填了模特会自动把文件夹名开头的模特名去掉），生成后可在列表里逐个手动编辑。
   </p>
-  <div class="grid2">
-    <div><label>默认系列（可空）</label><input type="text" id="bSeries" placeholder="应用于本次全部图集"></div>
-    <div><label>默认模特（可空）</label><input type="text" id="bModel" placeholder="例：许岚"></div>
-    <div><label>默认标签（逗号分隔，可空）</label><input type="text" id="bTags" placeholder="例：制服,黑丝"></div>
-    <div><label>日期</label><input type="date" id="bDate" value="{date.today().isoformat()}"></div>
-    <div><label>每套图集位于选中目录下的第几层</label>
-      <select id="bDepth">
-        <option value="1" selected>第 1 层（选中「许岚」，下面直接是各套图）</option>
-        <option value="2">第 2 层（选中「天翼云盘(crypt)」，许岚/NO.001 这样）</option>
-        <option value="3">第 3 层</option>
-      </select></div>
+  <div class="imp">
+    <div class="imp-title">本次导入</div>
+    <div class="grid2">
+      <div><label>模特 <span class="hint" id="bModelHint">（从文件夹自动识别，可改）</span></label>
+        <input type="text" id="bModel" placeholder="例：许岚 —— 本批全部图集都用它"></div>
+      <div><label>系列 <span class="hint">（可空）</span></label>
+        <input type="text" id="bSeries" placeholder="例：YITUYU艺图语"></div>
+      <div><label>标签（逗号分隔，可空）</label><input type="text" id="bTags" placeholder="例：制服,黑丝"></div>
+      <div><label>日期</label><input type="date" id="bDate" value="{date.today().isoformat()}"></div>
+      <div><label>每套图集位于第几层</label>
+        <select id="bDepth">
+          <option value="0" selected>自动（推荐）</option>
+          <option value="1">指定第 1 层（选中「许岚」，下面直接是各套图）</option>
+          <option value="2">指定第 2 层（选中「天翼云盘(crypt)」，许岚/NO.001 这样）</option>
+          <option value="3">指定第 3 层</option>
+        </select></div>
+    </div>
   </div>
   <div class="row">
     <label style="margin:0"><input type="checkbox" id="bAutoTag"> 同时 AI 打标（很慢：每套 10-30 秒，建议导入后统一跑「批量自动打标」）</label>
@@ -682,46 +693,92 @@ bdrop.ondrop=async e=>{
     try{Object.defineProperty(f,'webkitRelativePath',{value:(en.fullPath||'').replace(/^\\//,'')})}catch(err){}
     files.push(f);
   }
-  lastFiles=files;setGroups(buildGroups(files));
+  lastFiles=files;syncModel(parseInt(document.getElementById('bDepth').value,10));setGroups(buildGroups(files));
 };
-bfolder.onchange=()=>{lastFiles=[...bfolder.files];setGroups(buildGroups(lastFiles))};
-// 按「第 N 层子文件夹」分组（N 由下拉框决定，默认 1 = 选中目录的直接子文件夹）
+bfolder.onchange=()=>{lastFiles=[...bfolder.files];syncModel(parseInt(document.getElementById('bDepth').value,10));setGroups(buildGroups(lastFiles))};
+// ── 分组：定位「图集目录」在相对路径里的下标 ──
+// 路径有两种形态：选父文件夹 = [根, 图集, 文件…]；拖入图集目录 = [图集, 文件…]
+// 自动模式：段数 >= 3 取第 1 段（图集），否则取第 0 段（拖进来的就是图集目录）
+function setIndexOf(rel,depth){
+  if(depth>0)return Math.min(depth,rel.length-1);
+  return rel.length>=3?1:0;
+}
 function buildGroups(files){
-  const depth=Math.max(1,Math.min(3,parseInt(document.getElementById('bDepth').value||'1',10)));
+  const depth=parseInt(document.getElementById('bDepth').value||'0',10);
   const map=new Map();
   files.filter(f=>IMGRE2.test(f.name)).forEach(f=>{
     const rel=(f.webkitRelativePath||f.name).split('/');
-    // rel[0] 是选中的根目录，所以「第 N 层」= rel[N]；文件层级不够时归到最接近的那层
-    let key, idx=Math.min(depth, rel.length-1);
-    if(idx<1){key='(未命名)'}
-    else{key=rel.slice(1, idx+1).join(' / ')}
+    const si=setIndexOf(rel,depth);
+    const parts=rel.slice(1,si+1);
+    const key=(parts.length?parts.join(' / '):rel[si])||'(未命名)';
     if(!map.has(key))map.set(key,[]);
     map.get(key).push(f);
   });
   return [...map.entries()].map(([name,fs])=>{
     fs.sort((a,b)=>(a.webkitRelativePath||a.name).localeCompare(b.webkitRelativePath||b.name,'zh',{numeric:true}));
-    return {name,files:fs};
+    // 标题取路径最后一段（即图集目录名），多层时不要带上中间路径
+    const seg=name.split(' / ');
+    return {name,title:seg[seg.length-1],files:fs};
   }).sort((a,b)=>a.name.localeCompare(b.name,'zh',{numeric:true}));
 }
-function titleOf(name){
+function titleOf(g){
   const model=(document.getElementById('bModel').value||'').trim();
-  let t=name||'';
+  let t=(g&&g.title)||(typeof g==='string'?g:'');
   if(model&&t.startsWith(model))t=t.slice(model.length).trim();
-  return t||name;
+  return t||((g&&g.title)||g||'');
 }
 function setGroups(g){
   groups=g;
   const model=(document.getElementById('bModel').value||'').trim();
   document.getElementById('bList').innerHTML=groups.length?('<table class="lk"><thead><tr><th>#</th><th>来源文件夹</th><th>图片数</th><th>体积</th><th>将作为标题</th></tr></thead><tbody>'+
-    groups.map((x,i)=>'<tr><td>'+(i+1)+'</td><td>'+x.name+'</td><td>'+x.files.length+'</td><td>'+(x.files.reduce((s,f)=>s+f.size,0)/1048576).toFixed(1)+' MB</td><td><b>'+titleOf(x.name)+'</b></td></tr>').join('')+
+    groups.map((x,i)=>'<tr><td>'+(i+1)+'</td><td>'+x.name+'</td><td>'+x.files.length+'</td><td>'+(x.files.reduce((s,f)=>s+f.size,0)/1048576).toFixed(1)+' MB</td><td><b>'+titleOf(x)+'</b></td></tr>').join('')+
     '</tbody></table>'):'<p class="sub">还没选到文件夹（选中的目录里没有图片）</p>';
   const btn=document.getElementById('bStart');
   btn.disabled=!groups.length;
+  const total=groups.reduce((s,x)=>s+x.files.length,0);
   btn.textContent=groups.length?('开始导入 '+groups.length+' 套'):'开始导入';
-  document.getElementById('bMsg').textContent=groups.length?('共 '+groups.reduce((s,x)=>s+x.files.length,0)+' 张图片'):'';
+  document.getElementById('bMsg').innerHTML=groups.length
+    ? ('本次导入：<b>'+(model?('模特 '+model):'未填模特')+'</b>'+
+       ((document.getElementById('bSeries').value||'').trim()?(' · 系列 '+document.getElementById('bSeries').value.trim()):'')+
+       ' · <b>'+groups.length+' 套</b> · '+total+' 张图片')
+    : '';
+}
+// 从文件夹路径识别模特：图集目录的上一层就是模特目录（选中「许岚」时即选中目录本身）
+function detectModel(files,depth){
+  const valid=files.filter(x=>IMGRE2.test(x.name));
+  if(!valid.length)return '';
+  const relOf=f=>(f.webkitRelativePath||f.name).split('/');
+  const rel=relOf(valid[0]);
+  const si=setIndexOf(rel,depth);
+  if(si<1)return '';                            // 拖进来的是图集目录本身，上面没有模特层
+  const cand=rel[si-1]||'';
+  if(!cand||cand===rel[si])return '';
+  return cand;
+}
+function syncModel(depth){
+  const hint=document.getElementById('bModelHint'),inp=document.getElementById('bModel');
+  const det=detectModel(lastFiles,depth);
+  if(det&&!inp.value.trim()){
+    inp.value=det;
+    try{localStorage.setItem('batch-bModel',det)}catch(e){}
+    hint.textContent='（已从文件夹识别：'+det+'，可改）';
+  }else if(det){
+    hint.textContent='（文件夹里的模特是「'+det+'」，当前填的是别的）';
+  }else{
+    hint.textContent='（从文件夹自动识别，可改）';
+  }
 }
 document.getElementById('bModel').addEventListener('input',()=>setGroups(groups));
-document.getElementById('bDepth').addEventListener('change',()=>{if(lastFiles.length)setGroups(buildGroups(lastFiles))});
+document.getElementById('bSeries').addEventListener('input',()=>setGroups(groups));
+// 记住上次填的模特/系列/标签/层级（同一个模特常连着导好几批）
+['bModel','bSeries','bTags','bDepth'].forEach(id=>{
+  const el=document.getElementById(id);if(!el)return;
+  try{const v=localStorage.getItem('batch-'+id);if(v&&!el.value)el.value=v}catch(e){}
+  const save=()=>{try{localStorage.setItem('batch-'+id,el.value)}catch(e){}};
+  el.addEventListener('change',save);el.addEventListener('input',save);
+});
+if(document.getElementById('bModel').value)document.getElementById('bModelHint').textContent='（上次填的，可改）';
+document.getElementById('bDepth').addEventListener('change',()=>{if(lastFiles.length){syncModel(parseInt(document.getElementById('bDepth').value,10));setGroups(buildGroups(lastFiles))}});
 // 逐套上传（串行，便于看进度；不逐套重建，最后统一重建一次）
 async function startBatch(){
   if(!groups.length)return;
@@ -735,7 +792,7 @@ async function startBatch(){
   wrap.hidden=false;log.textContent='';
   let done=0,fail=0;
   for(const g of groups){
-    const title=titleOf(g.name);
+    const title=titleOf(g);
     msg.textContent='正在处理 第 '+(done+fail+1)+'/'+groups.length+' 套：'+title+' …';
     const fd=new FormData();
     fd.append('title',title);fd.append('date',date);
