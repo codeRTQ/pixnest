@@ -478,6 +478,32 @@ def log_line(kind, text):
         pass
 
 
+def after_tagging(tagged):
+    """打标跑完后的收尾：重建站点；开启自动发布时再同步到线上。
+    没有这一步，标签只写进了 sets/*/meta.json，页面（本地 8090 与线上）都不会变。
+    注意：重建 + 发布要几十秒，期间用 _at['finishing'] 标记，别让界面以为已经收工了。"""
+    if not tagged:
+        log_line('admin', '打标结束：本次没有新增标签，跳过重建')
+        return
+    _at['finishing'] = '正在重建站点…'
+    try:
+        ok, out = rebuild()
+        first = next((l for l in (out or '').splitlines() if l.strip()), '')
+        log_line('admin', f'打标结束自动重建：{"成功" if ok else "失败"}｜{first[:100]}')
+        if not ok:
+            _at['log'].append('✗ 打标后重建失败，页面不会更新（可手动点「重新构建站点」）')
+            return
+        if TAG_AUTOPUBLISH:
+            _at['finishing'] = '正在同步到线上…'
+            started, msg = publish_start()
+            log_line('admin', f'打标结束自动发布：{msg}')
+            _at['log'].append('🚀 自动同步到线上：' + msg)
+        else:
+            _at['log'].append('✓ 已自动重建站点（本地预览已更新；线上要点「同步到线上」）')
+    finally:
+        _at['finishing'] = ''
+
+
 def autotag_queue_add(slugs, why='上传后自动打标'):
     """把若干图集塞进后台打标队列（已有任务在跑就追加进去）。
     上传/保存这类请求绝不能在请求里同步等视觉模型 —— 免费接口一被限流就是 429，
@@ -535,6 +561,12 @@ def autotag_queue_add(slugs, why='上传后自动打标'):
         _at['current'] = ''
         _at['running'] = False
         _at['ended'] = time.time()
+        try:
+            after_tagging(_at.get('done', 0))
+        except Exception as e:  # noqa
+            log_line('error', f'打标后收尾失败：{type(e).__name__}: {e}')
+        finally:
+            _at['finishing'] = ''
 
     threading.Thread(target=run, daemon=True).start()
     return True, f'已把 {len(slugs)} 套放进后台打标队列（关闭页面不会中断，可在首页看进度）'
@@ -588,6 +620,12 @@ def autotag_batch_start(force=False, limit=0):
         _at['current'] = ''
         _at['running'] = False
         _at['ended'] = time.time()
+        try:
+            after_tagging(_at.get('done', 0))
+        except Exception as e:  # noqa
+            log_line('error', f'打标后收尾失败：{type(e).__name__}: {e}')
+        finally:
+            _at['finishing'] = ''
 
     threading.Thread(target=run, daemon=True).start()
     return True, f'已开始打标 {len(todo)} 套（可实时看进度，关闭页面不会中断）'
@@ -744,6 +782,10 @@ def _extract_json(text):
 
 
 _vision_cooldown = {}          # 模型 → 冷却到期时间戳（被 429 后先别再去撞，省请求额度）
+
+# 打标跑完后是否自动同步到线上（默认开：上传→打标→页面自己更新，不用手点）。
+# 不想要就设环境变量 TAG_AUTOPUBLISH=0
+TAG_AUTOPUBLISH = os.environ.get('TAG_AUTOPUBLISH', '1') not in ('0', 'false', 'no')
 
 
 def vision_analyze(paths, timeout=150):
@@ -2574,8 +2616,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._text('图集不存在', 404)
             try:
                 n, info, _ = autotag_set(set_dir, samples=int(d.get('samples', 3)), force=bool(d.get('force')))
-                ok, out = rebuild()
-                return self._text(f'🤖 自动打标完成：{n} 个标签\n{info}\n（可在编辑页手动调整）' if n else f'跳过：{info}')
+                if n:
+                    after_tagging(n)          # 重建站点 +（默认）自动同步到线上，页面立刻能看到新标签
+                return self._text(f'🤖 自动打标完成：{n} 个标签\n{info}\n（已在站点上生效，可继续在编辑页手动调整）' if n else f'跳过：{info}')
             except Exception as e:  # noqa
                 return self._text(f'自动打标失败：{e}', 500)
         if u.path == '/autotag-all':
@@ -2593,7 +2636,7 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(1.5)          # 控制频率，避免触发限流
                 except Exception as e:  # noqa
                     failed += 1; log.append(f'{s["slug"]}: 失败 {e}')
-            ok, out = rebuild()
+            after_tagging(done)
             return self._text(f'批量打标：成功 {done} 套，跳过 {skipped} 套，失败 {failed} 套\n' + '\n'.join(log[:20]))
         if u.path == '/bulk':
             d = self._json_body()
