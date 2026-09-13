@@ -203,8 +203,15 @@ def rebuild():
         return False, ('✗ 正在发布到线上（已用 %d 秒），请等发布完成后再重建站点。\n'
                        '  发布过程中改动 dist/ 会导致上传内容新旧混杂。'
                        % int(time.time() - _pub['started']))
+    env = dict(os.environ)
+    # 本地预览默认用精简模式：只拷缩略图（几百 MB、几秒），不拷几十 GB 原图
+    # 需要本地看原图时设 ADMIN_REBUILD=full
+    env['SITE_LITE'] = '1' if os.environ.get('ADMIN_REBUILD', 'lite') != 'full' else '0'
+    env['SITE_PUBLIC'] = '0'          # 本地预览保留 ?admin=1 入口
+    env.pop('SITE_BASE_URL', None)    # 本地不用线上域名
     try:
-        r = subprocess.run(['node', 'build.mjs'], cwd=ROOT, capture_output=True, text=True, timeout=300)
+        r = subprocess.run(['node', 'build.mjs'], cwd=ROOT, capture_output=True,
+                           text=True, encoding='utf-8', errors='replace', timeout=900, env=env)
         return r.returncode == 0, ((r.stdout or '') + (r.stderr or '')).strip()
     except Exception as e:  # noqa
         return False, f'重建失败：{e}'
@@ -1040,6 +1047,12 @@ document.getElementById('bStart').onclick=startBatch;
 """)
 
 
+def esc_attr(s):
+    """HTML 属性/文本转义（标签名可能含引号等字符）"""
+    return (str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            .replace('"', '&quot;').replace("'", '&#39;'))
+
+
 def all_tags():
     """汇总全站标签 → {标签: [使用它的图集slug...]}"""
     out = {}
@@ -1103,17 +1116,17 @@ def tags_page(msg=''):
     groups = tag_similar_groups()
     rows = sorted(tags.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     table = ''.join(
-        f'<tr><td><span class="chip" style="padding:4px 10px">{t}</span></td><td>{len(sl)}</td>'
+        f'<tr><td><span class="chip" style="padding:4px 10px">{esc_attr(t)}</span></td><td>{len(sl)}</td>'
         f'<td class="dim" style="font-size:12px">{"、".join(sl[:3])}{"…" if len(sl) > 3 else ""}</td>'
         f'<td><input type="text" class="rename" data-from="{t}" placeholder="改成…" style="max-width:140px">'
         f'<button class="mini" onclick="renameTag(this)">重命名</button>'
-        f'<button class="mini" onclick="delTag(\'{t}\')">全站删除</button></td></tr>'
+        f'<button class="mini" onclick="delTag(this)" data-tag="{esc_attr(t)}">全站删除</button></td></tr>'
         for t, sl in rows)
     ghtml = ''
     for g in groups:
         opts = ''.join(f'<option value="{t}">{t}（{len(tags.get(t, []))}）</option>' for t in g['tags'])
         ghtml += (f'<div class="taggroup"><div class="tg-list">'
-                  + ' + '.join(f'<span class="chip">{t}</span>' for t in g['tags'])
+                  + ' + '.join(f'<span class="chip" data-tag="{esc_attr(t)}">{esc_attr(t)}</span>' for t in g['tags'])
                   + f'</div><div class="tg-act"><span class="sub" style="margin:0">合并为：</span>'
                   + f'<select class="mergeto">{opts}</select>'
                   + f'<button class="btn sm" onclick="mergeGroup(this)">合并</button></div></div>')
@@ -1141,16 +1154,18 @@ function renameTag(btn){
   const inp=btn.parentElement.querySelector('.rename'),from=inp.dataset.from,to=inp.value.trim();
   if(!to){toast('请填写新标签名',false);return}
   if(!confirm('把全站「'+from+'」重命名为「'+to+'」？'))return;
+  toast('正在重命名并重建站点，请稍候…');
   post('/tagmerge',{from:[from],to},'/tags');
 }
-function delTag(t){if(!confirm('从全站删除标签「'+t+'」？'))return;post('/tagmerge',{from:[t],to:''},'/tags')}
+function delTag(btn){const t=btn.dataset.tag;if(!confirm('从全站删除标签「'+t+'」？'))return;toast('正在处理…');post('/tagmerge',{from:[t],to:''},'/tags')}
 function mergeGroup(btn){
   const sel=btn.parentElement.querySelector('.mergeto');
   const to=sel.value;
-  const group=[...btn.closest('.taggroup').querySelectorAll('.chip')].map(c=>c.textContent.trim());
+  const group=[...btn.closest('.taggroup').querySelectorAll('.chip')].map(c=>c.dataset.tag||c.textContent.trim());
   const from=group.filter(t=>t!==to);
-  if(!from.length)return;
-  if(!confirm('把 '+'、'.join(from)+' 合并进「'+to+'」？'))return;
+  if(!from.length){toast('这一组只有一个标签，无需合并',false);return}
+  if(!confirm('把 '+'、'.join(from)+' 合并进「'+to+'」？\\n\\n合并后这些旧标签会从全站图集移除，并替换为「'+to+'」。'))return;
+  toast('正在合并并重建站点，请稍候…');
   post('/tagmerge',{from,to},'/tags');
 }
 const tf=document.getElementById('tagFilter');
