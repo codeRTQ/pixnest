@@ -517,11 +517,13 @@ function heroHtml(pinned, rel = '') {
     ? `<button class="hero-nav hero-prev" aria-label="上一张">‹</button><button class="hero-nav hero-next" aria-label="下一张">›</button>`
     : ''
   const list = multi ? `<aside class="hero-list">
-      <h3>📌 置顶推荐（${pinned.length}）</h3>
-      ${pinned.map((s, i) => `<a class="hero-item${i ? '' : ' on'}" href="${rel}set/${s.slug}/index.html" data-i="${i}">
-        ${s.coverFile ? `<img src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="" loading="lazy">` : ''}
-        <span class="hero-item-text"><b>${esc(s.title)}</b><span>${[s.model, `${s.imageCount} 张`, s.sizeText].filter(Boolean).map(esc).join(' · ')}</span></span>
-      </a>`).join('')}
+      <div class="hero-list-inner">
+        <h3>📌 置顶推荐（${pinned.length}）</h3>
+        ${pinned.map((s, i) => `<a class="hero-item${i ? '' : ' on'}" href="${rel}set/${s.slug}/index.html" data-i="${i}">
+          ${s.coverFile ? `<img src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="" loading="lazy">` : ''}
+          <span class="hero-item-text"><b>${esc(s.title)}</b><span>${[s.model, `${s.imageCount} 张`, s.sizeText].filter(Boolean).map(esc).join(' · ')}</span></span>
+        </a>`).join('')}
+      </div>
     </aside>` : ''
   return `<section class="hero${multi ? '' : ' single'}" id="hero" aria-label="置顶推荐">
     <div class="hero-stage">
@@ -966,7 +968,7 @@ img{max-width:100%;display:block}
   background:var(--panel);color:var(--fg);font-size:18px;cursor:pointer;z-index:30;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .to-top:hover{border-color:var(--accent)}
 /* 置顶推荐轮播（列表页顶部）：左轮播舞台 + 右置顶清单 */
-.hero{display:grid;grid-template-columns:minmax(0,1fr) 284px;gap:14px;margin:18px 0 16px;align-items:start}
+.hero{display:grid;grid-template-columns:minmax(0,1fr) 284px;gap:14px;margin:18px 0 16px;align-items:stretch}
 .hero.single{grid-template-columns:1fr}
 .hero-stage{position:relative;border-radius:14px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
 .hero-track{position:relative;aspect-ratio:${config.heroRatio || '21/9'};max-height:${config.heroMaxHeight || 380}px;min-height:150px}
@@ -986,9 +988,14 @@ img{max-width:100%;display:block}
 .hero-dots{position:absolute;right:18px;bottom:14px;z-index:3;display:flex;gap:6px}
 .hero-dot{width:8px;height:8px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.45);cursor:pointer}
 .hero-dot.on{background:#fff;width:20px;border-radius:999px}
-/* 右侧置顶清单：一眼看全，点一下就切换，不用等自动播放 */
-.hero-list{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:4px}
-.hero-list h3{margin:0 0 8px;font-size:13px;color:var(--accent2);font-weight:600}
+/* 右侧置顶清单：高度锁定与轮播齐平、置顶再多也只在内部滚动，不会把版面撑长 */
+.hero-list{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;min-height:0;align-self:stretch}
+.hero-list-inner{position:absolute;inset:12px;overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-width:thin;scrollbar-color:var(--line) transparent;display:flex;flex-direction:column;gap:4px;padding-right:2px}
+.hero-list-inner::-webkit-scrollbar{width:6px}
+.hero-list-inner::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+.hero-list h3{margin:0 0 8px;font-size:13px;color:var(--accent2);font-weight:600;position:sticky;top:0;
+  background:var(--panel);padding-bottom:6px;z-index:2}
 .hero-item{display:flex;gap:10px;align-items:center;padding:6px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
 .hero-item:hover{background:var(--panel2)}
 .hero-item.on{background:var(--panel2);box-shadow:inset 0 0 0 1px var(--accent)}
