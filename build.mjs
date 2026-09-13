@@ -445,10 +445,6 @@ function detailPage(s, prev, next, canonical = '', related = []) {
   const rel = '../../'
   // 模特资料：仅展示填写过的字段（AI 不会生成这些）
   const pf = s.profile || {}
-  const pfLabels = {
-    birth: '出生', sign: '星座', city: '常驻', height: '身高', weight: '体重',
-    measure: '三围', shoes: '鞋码', style: '风格', other: '其他',
-  }
   // 社交账号单独渲染成可点链接（微博/抖音等平台按关键词搜索，避免写错主页地址）
   const pfSocial = { weibo: '微博', douyin: '抖音', x: 'X', ins: 'Instagram', bilibili: 'B站', xhs: '小红书' }
   const socialUrl = (k, v) => {
@@ -462,15 +458,29 @@ function detailPage(s, prev, next, canonical = '', related = []) {
       ins: 'https://www.instagram.com/' + encodeURIComponent(clean),
     }[k] || ''
   }
-  const pfItems = Object.keys(pfLabels).filter(k => pf[k])
-    .map(k => `<div><dt>${pfLabels[k]}</dt><dd>${esc(pf[k])}</dd></div>`)
+  // 模特资料：渲染成一段引文式文字（不堆卡片，可读性更好）
+  // 顺序：出生 → 星座 → 常驻 → 身高/体重/三围/鞋码 → 风格 → 其他；labels 为空的字段本身已说明含义，不加前缀
+  const pfOrder = [
+    ['birth', '出生'], ['sign', ''], ['city', ''],
+    ['height', '身高'], ['weight', '体重'], ['measure', '三围'], ['shoes', '鞋码'],
+    ['style', ''], ['other', ''],
+  ]
+  const pfParts = []
+  pfOrder.forEach(([k, label]) => {
+    if (!pf[k]) return
+    const v = String(pf[k]).trim()
+    if (!label) { pfParts.push(v); return }
+    // 「1998 年」→「1998 年出生」读起来更顺
+    pfParts.push(k === 'birth' && /^\d{4}\s*年?$/.test(v) ? v.replace(/\s*年?$/, ' 年出生') : `${label} ${v}`)
+  })
   const pfSocialItems = Object.keys(pfSocial).filter(k => pf[k]).map(k => {
     const v = String(pf[k])
     const u = socialUrl(k, v)
-    return `<div><dt>${pfSocial[k]}</dt><dd>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}</dd></div>`
+    return `${pfSocial[k]} ${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}`
   })
-  const profileBlock = (pfItems.length + pfSocialItems.length)
-    ? `<section class="profile"><h3 class="pf-title">模特资料</h3><dl class="pf-list">${pfItems.join('')}${pfSocialItems.join('')}</dl></section>`
+  const pfText = pfParts.join(' · ')
+  const profileBlock = (pfText || pfSocialItems.length)
+    ? `<blockquote class="pf-quote">${pfText ? `<p>${esc(pfText)}</p>` : ''}${pfSocialItems.length ? `<p class="pf-social">${pfSocialItems.join(' · ')}</p>` : ''}</blockquote>`
     : ''
   const downloadBlock = `
   <section class="download">
@@ -699,12 +709,16 @@ img{max-width:100%;display:block}
 .tag-model{color:var(--accent2);border-color:rgba(255,180,84,.4)}
 .model-info{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent2);border-radius:10px;padding:12px 14px;margin:0 0 18px;font-size:13.5px;line-height:1.7}
 .mi-label{flex:0 0 auto;color:var(--accent2);font-weight:600}
-.profile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:0 0 18px}
-.pf-title{margin:0 0 10px;font-size:14px;color:var(--accent2);font-weight:600}
-.pf-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:0}
-.pf-list div{background:var(--panel2);border-radius:8px;padding:8px 12px}
-.pf-list dt{color:var(--dim);font-size:12px}
-.pf-list dd{margin:2px 0 0;font-weight:600;font-size:15px}
+/* 模特资料：引文式（类似 Markdown blockquote） */
+.pf-quote{margin:0 0 20px;padding:10px 0 10px 16px;border-left:3px solid var(--accent);
+  background:linear-gradient(90deg,rgba(91,140,255,.07),transparent 60%);
+  border-radius:0 8px 8px 0;color:var(--dim);font-size:14px;line-height:1.95;letter-spacing:.01em}
+.pf-quote p{margin:0}
+.pf-quote p + p{margin-top:6px}
+.pf-social{font-size:13px;opacity:.92}
+.pf-quote a{color:var(--accent);text-decoration:none;border-bottom:1px dashed rgba(91,140,255,.45)}
+.pf-quote a:hover{color:var(--accent2);border-bottom-color:var(--accent2)}
+html[data-theme="light"] .pf-quote{background:linear-gradient(90deg,rgba(47,107,255,.08),transparent 60%)}
 .more-hint{color:var(--dim);text-align:center;font-size:13px;margin:16px 0}
 .prevnext{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:32px 0}
 .pn{display:flex;flex-direction:column;gap:4px;padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
