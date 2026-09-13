@@ -495,12 +495,13 @@ function pagerHtml(page, totalPages, hrefOf) {
   </nav>`
 }
 
-/** 置顶推荐轮播（列表页顶部；没有置顶图集时返回空串，页面自动退回标题样式） */
+/** 置顶推荐轮播（列表页顶部；没有置顶图集时返回空串，页面自动退回标题样式）
+ *  布局：左边 16:9 轮播舞台 + 右边置顶清单（点清单可切换，不用等自动播放） */
 function heroHtml(pinned, rel = '') {
   if (!pinned.length) return ''
-  const slides = pinned.map(s => `
-    <a class="hero-slide" href="${rel}set/${s.slug}/index.html" aria-label="${esc(s.title)}">
-      ${s.coverFile ? `<img src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="${esc(s.title)}"${pinned.indexOf(s) ? ' loading="lazy"' : ''}>` : ''}
+  const slides = pinned.map((s, i) => `
+    <a class="hero-slide${i ? '' : ' on'}" href="${rel}set/${s.slug}/index.html" aria-label="${esc(s.title)}">
+      ${s.coverFile ? `<img src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="${esc(s.title)}"${i ? ' loading="lazy"' : ''}>` : ''}
       <span class="hero-info">
         <span class="hero-badge">📌 置顶推荐</span>
         <h2>${esc(s.title)}</h2>
@@ -508,14 +509,25 @@ function heroHtml(pinned, rel = '') {
         <span class="hero-cta">查看图集 →</span>
       </span>
     </a>`).join('')
-  const dots = pinned.length > 1
+  const multi = pinned.length > 1
+  const dots = multi
     ? `<div class="hero-dots">${pinned.map((_, i) => `<button class="hero-dot${i ? '' : ' on'}" aria-label="第 ${i + 1} 张"></button>`).join('')}</div>`
     : ''
-  const nav = pinned.length > 1
+  const nav = multi
     ? `<button class="hero-nav hero-prev" aria-label="上一张">‹</button><button class="hero-nav hero-next" aria-label="下一张">›</button>`
     : ''
-  return `<section class="hero" id="hero" aria-label="置顶推荐">
-    <div class="hero-track">${slides}</div>${nav}${dots}
+  const list = multi ? `<aside class="hero-list">
+      <h3>📌 置顶推荐（${pinned.length}）</h3>
+      ${pinned.map((s, i) => `<a class="hero-item${i ? '' : ' on'}" href="${rel}set/${s.slug}/index.html" data-i="${i}">
+        ${s.coverFile ? `<img src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="" loading="lazy">` : ''}
+        <span class="hero-item-text"><b>${esc(s.title)}</b><span>${[s.model, `${s.imageCount} 张`, s.sizeText].filter(Boolean).map(esc).join(' · ')}</span></span>
+      </a>`).join('')}
+    </aside>` : ''
+  return `<section class="hero${multi ? '' : ' single'}" id="hero" aria-label="置顶推荐">
+    <div class="hero-stage">
+      <div class="hero-track">${slides}</div>${nav}${dots}
+    </div>
+    ${list}
   </section>`
 }
 
@@ -953,30 +965,45 @@ img{max-width:100%;display:block}
 .to-top{position:fixed;right:22px;bottom:26px;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);
   background:var(--panel);color:var(--fg);font-size:18px;cursor:pointer;z-index:30;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .to-top:hover{border-color:var(--accent)}
-/* 置顶推荐轮播（列表页顶部） */
-.hero{position:relative;margin:18px 0 16px;border-radius:14px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
-.hero-track{position:relative;aspect-ratio:16/6;min-height:180px}
+/* 置顶推荐轮播（列表页顶部）：左轮播舞台 + 右置顶清单 */
+.hero{display:grid;grid-template-columns:minmax(0,1fr) 284px;gap:14px;margin:18px 0 16px;align-items:start}
+.hero.single{grid-template-columns:1fr}
+.hero-stage{position:relative;border-radius:14px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
+.hero-track{position:relative;aspect-ratio:16/9;min-height:200px}
 .hero-slide{position:absolute;inset:0;display:block;opacity:0;transition:opacity .55s ease;text-decoration:none;color:#fff;pointer-events:none}
 .hero-slide.on{opacity:1;pointer-events:auto}
-.hero-slide img{width:100%;height:100%;object-fit:cover;display:block}
-.hero-slide::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,0,0,.8) 0%,rgba(0,0,0,.45) 48%,rgba(0,0,0,.1) 100%)}
-.hero-info{position:absolute;left:22px;right:22px;bottom:20px;z-index:2;display:flex;flex-direction:column;gap:7px;align-items:flex-start}
+.hero-slide img{width:100%;height:100%;object-fit:cover;object-position:center 22%;display:block}
+.hero-slide::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.15) 0%,rgba(0,0,0,.25) 45%,rgba(0,0,0,.82) 100%)}
+.hero-info{position:absolute;left:20px;right:20px;bottom:18px;z-index:2;display:flex;flex-direction:column;gap:7px;align-items:flex-start}
 .hero-badge{background:rgba(255,180,84,.92);color:#1a1206;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px}
-.hero-info h2{margin:0;font-size:22px;line-height:1.35;text-shadow:0 2px 12px rgba(0,0,0,.55)}
+.hero-info h2{margin:0;font-size:20px;line-height:1.35;text-shadow:0 2px 12px rgba(0,0,0,.55)}
 .hero-meta{color:rgba(255,255,255,.86);font-size:13px;text-shadow:0 1px 8px rgba(0,0,0,.5)}
 .hero-cta{background:var(--accent);color:#fff;padding:7px 16px;border-radius:999px;font-size:13px;margin-top:2px}
-.hero-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:36px;height:36px;border-radius:50%;
+.hero-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:34px;height:34px;border-radius:50%;
   border:1px solid rgba(255,255,255,.35);background:rgba(0,0,0,.45);color:#fff;font-size:18px;line-height:1;cursor:pointer;backdrop-filter:blur(4px)}
 .hero-nav:hover{background:rgba(0,0,0,.7)}
-.hero-prev{left:12px}.hero-next{right:12px}
-.hero-dots{position:absolute;right:16px;bottom:18px;z-index:3;display:flex;gap:6px}
+.hero-prev{left:10px}.hero-next{right:10px}
+.hero-dots{position:absolute;left:20px;bottom:16px;z-index:3;display:flex;gap:6px;transform:translateY(0)}
 .hero-dot{width:8px;height:8px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.45);cursor:pointer}
 .hero-dot.on{background:#fff;width:20px;border-radius:999px}
-@media (max-width:700px){
+/* 右侧置顶清单：一眼看全，点一下就切换，不用等自动播放 */
+.hero-list{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:4px}
+.hero-list h3{margin:0 0 8px;font-size:13px;color:var(--accent2);font-weight:600}
+.hero-item{display:flex;gap:10px;align-items:center;padding:6px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
+.hero-item:hover{background:var(--panel2)}
+.hero-item.on{background:var(--panel2);box-shadow:inset 0 0 0 1px var(--accent)}
+.hero-item img{width:44px;height:59px;flex:0 0 44px;border-radius:6px;object-fit:cover;background:var(--panel2)}
+.hero-item-text{min-width:0;display:flex;flex-direction:column;gap:3px}
+.hero-item-text b{font-size:13px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.hero-item-text span{font-size:11.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:860px){
+  .hero{grid-template-columns:1fr}
+  .hero-list{display:none}
   .hero-track{aspect-ratio:4/3}
   .hero-info{left:14px;right:14px;bottom:14px}
   .hero-info h2{font-size:17px}
   .hero-prev,.hero-next{display:none}
+  .hero-dots{left:14px;bottom:14px}
 }
 .badge-pin{left:8px;top:auto;bottom:8px;background:rgba(255,180,84,.92);color:#1a1206;font-weight:600}
 .pagination-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;margin:30px 0 10px}
@@ -1372,12 +1399,14 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       if (heroBox) {
         const slides = [...heroBox.querySelectorAll('.hero-slide')];
         const dots = [...heroBox.querySelectorAll('.hero-dot')];
+        const items = [...heroBox.querySelectorAll('.hero-item')];
         if (slides.length > 1) {
           let hi = 0, ht = null;
           const show = (i) => {
             hi = (i + slides.length) % slides.length;
             slides.forEach((el, k) => el.classList.toggle('on', k === hi));
             dots.forEach((el, k) => el.classList.toggle('on', k === hi));
+            items.forEach((el, k) => el.classList.toggle('on', k === hi));
           };
           const stop = () => { if (ht) { clearInterval(ht); ht = null; } };
           const play = () => { stop(); ht = setInterval(() => show(hi + 1), 5000); };
@@ -1385,6 +1414,8 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
           heroBox.querySelector('.hero-prev').addEventListener('click', () => jump(hi - 1));
           heroBox.querySelector('.hero-next').addEventListener('click', () => jump(hi + 1));
           dots.forEach((el, k) => el.addEventListener('click', () => jump(k)));
+          // 右侧清单：点标题进图集，点缩略图切换当前轮播
+          items.forEach((el, k) => el.addEventListener('mouseenter', () => show(k)));
           heroBox.addEventListener('mouseenter', stop);
           heroBox.addEventListener('mouseleave', play);
           let hx = null;
@@ -1396,8 +1427,6 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
             hx = null; play();
           }, { passive: true });
           show(0); play();
-        } else if (slides.length === 1) {
-          slides[0].classList.add('on');           // 只有一条置顶：不轮播，静态展示
         }
       }
       // 函数都就位了，现在才安全地按 URL 里的 ?q= 渲染初始结果
