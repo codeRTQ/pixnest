@@ -50,12 +50,24 @@ IMG_EXT = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff'}
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
 WEBP_ENABLED = os.environ.get('WEBP_THUMBS', '1') != '0'   # 额外生成 WebP 缩略图
 
-# ── 自动打标：OVHcloud 免费匿名视觉链（免 key，每模型 2 次/分钟，5 模型轮流） ──
-VISION_BASE = os.environ.get('VISION_BASE', 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1')
-VISION_MODELS = [
-    'Qwen2.5-VL-72B-Instruct', 'Qwen3.5-397B-A17B', 'Qwen3.6-27B',
-    'Mistral-Small-3.2-24B-Instruct-2506', 'Qwen3.5-9B',
-]
+# ── 自动打标：默认用 OVHcloud 免费匿名视觉链（免 key，每模型 2 次/分钟，5 模型轮流）
+#    限流太狠时可以换成自己的接口：在 site.json 里加
+#      "vision": { "base": "https://open.bigmodel.cn/api/paas/v4", "key": "你的key",
+#                  "models": ["glm-4v-flash"] }
+#    或用环境变量 VISION_BASE / VISION_API_KEY / VISION_MODELS 覆盖（模型名逗号分隔）
+try:
+    _SITE_CFG = json.load(open(os.path.join(ROOT, 'site.json'), encoding='utf-8'))
+except Exception:  # noqa
+    _SITE_CFG = {}
+SITE_VISION = (_SITE_CFG.get('vision') or {}) if isinstance(_SITE_CFG, dict) else {}
+VISION_BASE = os.environ.get('VISION_BASE') or SITE_VISION.get('base') or 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1'
+VISION_KEY = os.environ.get('VISION_API_KEY') or SITE_VISION.get('key') or ''
+VISION_MODELS = ([m.strip() for m in os.environ['VISION_MODELS'].split(',') if m.strip()]
+                 if os.environ.get('VISION_MODELS')
+                 else (SITE_VISION.get('models') or [
+                     'Qwen2.5-VL-72B-Instruct', 'Qwen3.5-397B-A17B', 'Qwen3.6-27B',
+                     'Mistral-Small-3.2-24B-Instruct-2506', 'Qwen3.5-9B',
+                 ]))
 VISION_PROMPT = (
     '你在为写真图集网站做内容标注。用户会给出同一套图集中的 1-3 张样图。\n'
     '请只输出一个 JSON 对象（不要任何解释、不要 markdown 代码块），格式：\n'
@@ -434,6 +446,83 @@ _at = {'running': False, 'total': 0, 'done': 0, 'skipped': 0, 'failed': 0, 'curr
        'log': [], 'started': 0.0, 'ended': 0.0, 'forced': False}
 
 
+def log_line(kind, text):
+    """写后台日志文件：上传/发布这类慢操作出问题时能事后查（之前后台输出直接丢弃，出事只能猜）"""
+    try:
+        os.makedirs(os.path.join(ROOT, 'logs'), exist_ok=True)
+        p = os.path.join(ROOT, 'logs', kind + '.log')
+        with open(p, 'a', encoding='utf-8') as f:
+            f.write(f'[{time.strftime("%Y-%m-%d %H:%M:%S")}] {text}\n')
+        # 单文件超过 2MB 就截断保留尾部
+        if os.path.getsize(p) > 2 * 1024 * 1024:
+            data = open(p, encoding='utf-8', errors='replace').read()[-1024 * 1024:]
+            open(p, 'w', encoding='utf-8').write(data)
+    except Exception:  # noqa
+        pass
+
+
+def autotag_queue_add(slugs, why='上传后自动打标'):
+    """把若干图集塞进后台打标队列（已有任务在跑就追加进去）。
+    上传/保存这类请求绝不能在请求里同步等视觉模型 —— 免费接口一被限流就是 429，
+    一次调用要重试 50 秒以上，前端会一直转圈，看着像"上传卡住了"。"""
+    slugs = [s for s in slugs if s]
+    if not slugs:
+        return False, '没有需要打标的图集'
+    with _at_lock:
+        if _at['running']:
+            _at.setdefault('extra', []).extend(slugs)
+            _at['total'] = _at.get('total', 0) + len(slugs)
+            _at['log'].append(f'＋ {why}：追加 {len(slugs)} 套到队列')
+            return True, f'已追加 {len(slugs)} 套到正在进行的打标队列'
+        sets = [s for s in list_sets() if s['slug'] in set(slugs)]
+        _at.update({'running': True, 'total': len(sets), 'done': 0, 'skipped': 0, 'failed': 0,
+                    'current': '', 'log': [f'▶ {why}：{len(sets)} 套'], 'started': time.time(),
+                    'ended': 0.0, 'forced': False, 'extra': []})
+
+    def run():
+        queue = [(s, 0) for s in sets]
+        while True:
+            with _at_lock:
+                for sl in _at.get('extra') or []:
+                    one = next((x for x in list_sets() if x['slug'] == sl), None)
+                    if one:
+                        queue.append((one, 0))
+                _at['extra'] = []
+            if not queue:
+                break
+            s, tries = queue.pop(0)
+            title = s['meta'].get('title') or s['slug']
+            if not os.path.isdir(os.path.join(SETS_DIR, s['slug'])):
+                _at['log'].append(f'– {title}：图集已删除，跳过')
+                _at['skipped'] += 1
+                continue
+            _at['current'] = title + (f'（重试 {tries}）' if tries else '')
+            try:
+                n, info, _ = autotag_set(os.path.join(SETS_DIR, s['slug']), samples=3)
+                if n:
+                    _at['done'] += 1
+                    _at['log'].append(f'✓ {title}：{str(info)[:70]}')
+                else:
+                    _at['skipped'] += 1
+                    _at['log'].append(f'– {title}：跳过（{str(info)[:50]}）')
+                time.sleep(4)
+            except Exception as e:  # noqa
+                if tries < 3:
+                    queue.append((s, tries + 1))
+                    _at['log'].append(f'↻ {title}：{e} → 等限流窗口恢复后重试')
+                    time.sleep(60)
+                    continue
+                _at['failed'] += 1
+                _at['log'].append(f'✗ {title}：{e}（已重试 {tries} 次）')
+                time.sleep(4)
+        _at['current'] = ''
+        _at['running'] = False
+        _at['ended'] = time.time()
+
+    threading.Thread(target=run, daemon=True).start()
+    return True, f'已把 {len(slugs)} 套放进后台打标队列（关闭页面不会中断，可在首页看进度）'
+
+
 def autotag_batch_start(force=False, limit=0):
     """后台批量打标；force=True 连已打标的也重打，limit>0 只处理前 N 套"""
     with _at_lock:
@@ -636,7 +725,9 @@ def vision_analyze(paths, timeout=150):
                 }).encode('utf-8')
                 req = urllib.request.Request(
                     VISION_BASE.rstrip('/') + '/chat/completions', data=body,
-                    headers={'Content-Type': 'application/json', 'User-Agent': 'img-site-admin'})
+                    headers={'Content-Type': 'application/json', 'User-Agent': 'img-site-admin'} if not VISION_KEY
+                    else {'Content-Type': 'application/json', 'User-Agent': 'img-site-admin',
+                          'Authorization': 'Bearer ' + VISION_KEY})
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     data = json.loads(resp.read().decode('utf-8'))
                 out = _extract_json(data['choices'][0]['message']['content'])
@@ -1815,6 +1906,7 @@ def home_page(msg='', q='', page_no=1, per=24, sort='date-desc', view='card'):
         + (f'&per={per}' if per != 24 else '') + (f'&view={view}' if view != 'card' else '')
     base_qs = base_qs.lstrip('&') or 'per=24'
     sets = all_sets  # 顶部统计/其它区块仍用全量
+    untagged = sum(1 for s in all_sets if not (s['meta'].get('autoTags') or []))
     body = f"""
 <h1>图集管理后台</h1>
 <p class="sub">上传 → 自动生成缩略图(长边 {PREVIEW_LONG}px)+模糊占位图 → 写入 sets/ → 重建静态站 · 端口 {PORT}</p>
@@ -1850,7 +1942,10 @@ def home_page(msg='', q='', page_no=1, per=24, sort='date-desc', view='card'):
     <span class="sub" id="upProgress" style="margin:0"></span></div>
   <div class="progress" id="progWrap" hidden><div class="bar" id="progBar"></div></div>
 </form>
-<div class="panel"><h2>② 已有图集（{total_all} 套{(' · 筛选出 ' + str(total_hit) + ' 套') if q else ''}）<span class="sub" style="font-weight:400"> · 点击卡片即可编辑</span></h2>
+<div class="panel"><h2>② 已有图集（{total_all} 套{(' · 筛选出 ' + str(total_hit) + ' 套') if q else ''}）<span class="sub" style="font-weight:400"> · 点击卡片即可编辑</span>
+  {f'<span class="sub" style="font-weight:400"> · 🤖 {untagged} 套还没打标</span>' if untagged else ''}
+  {f'<span class="sub" style="font-weight:400"> · 🤖 打标队列进行中（{_at.get("done", 0)}/{_at.get("total", 0)}）</span>' if _at.get('running') else ''}
+  </h2>
   <form class="row" method="get" action="/" style="margin:0 0 12px;align-items:center">
     <input type="search" name="q" value="{esc_attr(q)}" placeholder="搜索标题 / 模特 / 标签 / 系列 / 目录名（回车=全库搜索）" style="max-width:340px">
     <select name="sort" onchange="this.form.submit()" style="padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--fg)">
@@ -2333,11 +2428,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # 全局兜底：任何未预期异常都要变成一句人能看懂的话（否则异常会掐断连接，
         # 前端 fetch 拿不到响应、页面上什么都不显示 —— 之前「删除图集点了没反应」就是这个）
+        t0 = time.time()
         try:
-            return self._do_post()
+            r = self._do_post()
+            cost = time.time() - t0
+            if cost > 2:                      # 慢操作记一笔，方便排查"卡住"
+                log_line('admin', f'POST {self.path} 用时 {cost:.1f}s 长度 {self.headers.get("Content-Length", "?")}')
+            return r
         except Exception as e:  # noqa
             import traceback
+            tb = traceback.format_exc()
             traceback.print_exc()
+            log_line('error', f'POST {self.path} 出错：{type(e).__name__}: {e}\n{tb}')
             try:
                 self._text('✗ 后台执行出错：%s: %s' % (type(e).__name__, e), 500)
             except Exception:  # noqa
@@ -2791,11 +2893,9 @@ class Handler(BaseHTTPRequestHandler):
         save_meta(set_dir, meta)
         tag_info = ''
         if g('autotag') in ('1', 'on', 'true'):
-            try:
-                n, info, _ = autotag_set(set_dir, samples=3)
-                tag_info = f'  🤖 自动打标：{info}\n' if n else f'  自动打标跳过：{info}\n'
-            except Exception as e:  # noqa
-                tag_info = f'  ⚠️ 自动打标失败（可稍后在编辑页重试）：{e}\n'
+            # 不在请求里同步等视觉模型（限流时会挂 1 分钟以上）→ 丢进后台队列，立刻返回
+            ok_q, qmsg = autotag_queue_add([slug])
+            tag_info = f'  🤖 {qmsg}\n' if ok_q else f'  自动打标未排队：{qmsg}\n'
 
         # 与全库比对：内容与别的图集完全相同 → 提醒（常见于重复导入同一套图）
         dup_sets = find_duplicate_sets(set_dir, exclude_slug=slug)
