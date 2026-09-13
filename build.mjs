@@ -715,7 +715,8 @@ img{max-width:100%;display:block}
 .badge-size{left:auto;right:8px;background:rgba(91,140,255,.85)}
 .card-title{margin:0;padding:12px 12px 6px;font-size:14px;line-height:1.5;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:0 12px 12px;font-size:12px;color:var(--dim)}
-.card-meta time{margin-left:auto}
+/* 日期固定单独占一行右对齐：标签多少不一，若跟着标签排会出现"有的同行、有的换行" */
+.card-meta time{flex:1 0 100%;margin:0;text-align:right}
 .tag{padding:1px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--dim);font-size:12px;text-decoration:none;display:inline-block;transition:.15s}
 .tag-series{color:var(--accent);border-color:rgba(91,140,255,.4)}
 .card-meta a.tag:hover,.detail-meta a.tag:hover{color:var(--accent);border-color:var(--accent);background:rgba(91,140,255,.12)}
