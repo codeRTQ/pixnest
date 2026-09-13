@@ -16,14 +16,17 @@
  *   dist/assets/style.css, dist/assets/app.js
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, copyFileSync, rmSync, openSync, readSync, closeSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, copyFileSync, rmSync, renameSync, openSync, readSync, closeSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join, dirname, extname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const SETS_DIR = join(ROOT, 'sets')
-const DIST = join(ROOT, 'dist')
+const DIST_REAL = join(ROOT, 'dist')          // 对外目录：预览服务器与 deploy.py 都读它
+const DIST_STAGE = join(ROOT, 'dist.new')     // 构建真正写入的暂存目录
+const DIST_OLD = join(ROOT, 'dist.old')       // 切换时旧产物临时挪到这里
+let DIST = DIST_STAGE                          // 构建期间所有 join(DIST, ...) 都落在暂存目录
 
 // ─────────────────────────── 配置 ───────────────────────────
 const defaultConfig = {
@@ -1270,34 +1273,82 @@ function writeAssets() {
   return true
 }
 
+/** 同步等待（不引额外依赖，也不用假的 shell sleep） */
+const sleepSync = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } catch {} }
+
 /**
- * 清空 dist。Windows 上 rmSync 常因文件被杀软/索引器/预览服务器瞬时占用而
- * 抛 ENOTEMPTY / EBUSY（删到一半失败），整个构建就崩了 —— 之前"改封面后样式全丢"
- * 就是构建在半路挂掉留下的半成品。这里自带重试，仍失败则退化为"逐个删 + 继续构建"：
- * 页面反正会全部重写，最坏情况只是残留几个已删除图集的旧文件，不影响访客看到的内容。
+ * 逐个删目录内容（Windows 上整树 rmSync 常因文件被杀软/预览服务器瞬时占用而
+ * 抛 ENOTEMPTY/EBUSY）。返回没删掉的项数。
  */
-function wipeDist() {
-  try {
-    rmSync(DIST, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 })
-    return
-  } catch (e) {
-    console.warn('! 清空 dist 失败（' + (e.code || e.message) + '），改为逐个删除后继续构建')
-  }
+function rmContents(dir) {
   let left = 0
-  try {
-    for (const name of readdirSync(DIST)) {
-      const p = join(DIST, name)
-      try { rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }) }
-      catch { left++ }
+  let names = []
+  try { names = readdirSync(dir) } catch { return 0 }
+  for (const name of names) {
+    const p = join(dir, name)
+    try {
+      rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+    } catch {
+      try { rmSync(p, { recursive: true, force: true }) } catch { left++ }
     }
-  } catch { /* dist 不存在等情况直接忽略 */ }
-  if (left) console.warn(`! 有 ${left} 项没能删掉（多半被占用），它们的旧文件会留着，但不影响本次构建结果`)
-  mkdirSync(DIST, { recursive: true })
+  }
+  return left
+}
+
+/** 清空一个目录（先整树删、失败再逐个删；仍失败也不抛错，交给调用方决定） */
+function wipeDist(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 })
+    return 0
+  } catch { /* 落到逐个删 */ }
+  return rmContents(dir)
+}
+
+/**
+ * 原子切换：暂存目录建好后整体换上去。
+ * 这样"构建到一半"永远不会影响访客看到的 dist（构建期间读的一直是旧产物）。
+ *
+ * 坑：Windows 上 rename 的**目标目录已存在**时会报 EPERM（不是被占用！），
+ * 所以备份名必须保证不存在 —— 上一次残留的空 dist.old 就足以让下一次切换失败。
+ */
+function promoteStage() {
+  // 1) 备份名：优先 dist.old，被占就换 dist.old1/2/3…（顺带清理历史残留）
+  let oldPath = DIST_OLD
+  for (let i = 1; existsSync(oldPath) && i <= 20; i++) {
+    rmContents(oldPath)
+    try { rmSync(oldPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 }) } catch {}
+    if (!existsSync(oldPath)) break
+    oldPath = join(ROOT, 'dist.old' + i)
+  }
+  // 2) dist → 备份名
+  try {
+    renameSync(DIST_REAL, oldPath)
+  } catch (e) {
+    // 不删 dist！宁可这次构建不算数，也不让访客看到半成品
+    rmContents(DIST_STAGE)
+    console.error('× 无法切换产物：dist 改名失败（' + (e.code || e.message) + '）')
+    console.error('  dist 保持原样未动；本次构建结果在 dist.new/，关掉占用 dist 的程序后重跑即可')
+    process.exit(1)
+  }
+  // 3) dist.new → dist；失败则回滚，绝不留下"没有 dist"的状态
+  try {
+    renameSync(DIST_STAGE, DIST_REAL)
+  } catch (e) {
+    try { renameSync(oldPath, DIST_REAL) } catch {}
+    console.error('× 产物切换失败：' + (e.code || e.message) + '（已回滚到上一版 dist）')
+    process.exit(1)
+  }
+  // 4) 清掉旧产物（删不掉就留着，下次构建开头再清）
+  rmContents(oldPath)
+  try { rmSync(oldPath, { recursive: true, force: true }) } catch { /* 空目录残留无妨 */ }
 }
 
 function build() {
   if (!existsSync(SETS_DIR)) { console.error('× 找不到 sets/ 目录'); process.exit(1) }
-  wipeDist()
+  // 全程写暂存目录，最后原子切换（构建中途失败/被打断，访客读到的 dist 依然是上一版完整的）
+  DIST = DIST_STAGE
+  const leftStage = wipeDist(DIST_STAGE)
+  if (leftStage) console.warn(`! dist.new 里有 ${leftStage} 项没删掉（被占用），会直接覆盖写入`)
   mkdirSync(join(DIST, 'assets'), { recursive: true })
   ASSET_V = createHash('sha1').update(STYLE + APP).digest('hex').slice(0, 8)
     + (config.assetSalt ? '-' + config.assetSalt : '')
@@ -1323,7 +1374,9 @@ function build() {
   const totalPages = Math.max(1, Math.ceil(sets.length / per))
   for (let p = 1; p <= totalPages; p++) {
     const pageSets = sets.slice((p - 1) * per, p * per)
-    const rel = p === 1 ? '' : '../../'
+    // 分页页在 dist/page/N.html，比首页深一层 → 相对路径只用一级 ../
+    // （原来写的 ../../ 靠浏览器"不能上到域名之上"夹住才没出错，路径本身是错的）
+    const rel = p === 1 ? '' : '../'
     const html = listPage(pageSets, p, totalPages, rel, sets.length, sets)
     if (p === 1) writeFileSync(join(DIST, 'index.html'), html)
     else { mkdirSync(join(DIST, 'page'), { recursive: true }); writeFileSync(join(DIST, `page/${p}.html`), html) }
@@ -1513,6 +1566,9 @@ function build() {
     `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>\n<title>${esc(config.siteName)}</title>\n<link>${esc(base || '/')}</link>\n<description>${esc(config.siteSubtitle)}</description>\n`
     + sets.slice(0, 30).map(s => `  <item>\n    <title>${esc(s.title)}</title>\n    <link>${esc(pageUrl(`set/${encodeURIComponent(s.slug)}/index.html`))}</link>\n    <guid>${esc(pageUrl(`set/${encodeURIComponent(s.slug)}/index.html`))}</guid>\n    <pubDate>${rssDate(s.date)}</pubDate>\n    <description>${esc(s.description || s.tags.join('、'))}</description>\n  </item>`).join('\n')
     + `\n</channel></rss>\n`)
+
+  // ★ 全部写完 → 原子切换到 dist/（构建中途失败时访客读到的还是上一版完整站点）
+  promoteStage()
 
   console.log(`✓ 构建完成：${sets.length} 套图集 · ${totalPages} 个列表页 → dist/`)
   console.log(`  缩略图部署 ${deployedThumbCount} 个`)

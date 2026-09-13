@@ -220,6 +220,119 @@ def _run_build(env):
 _rebuild_lock = threading.Lock()
 
 
+def health_check():
+    """站点体检：一键检查产物是否齐全、样式是否可达、各页引用的资源版本是否一致。
+    针对"改封面后样式全丢"这类事故做的自检。"""
+    import random
+    import re
+    DIST = os.path.join(ROOT, 'dist')
+    lines, bad, warn = [], 0, 0
+
+    def add(ok, text, level='bad'):
+        nonlocal bad, warn
+        mark = '✅' if ok else ('⚠️' if level == 'warn' else '❌')
+        if not ok:
+            if level == 'warn':
+                warn += 1
+            else:
+                bad += 1
+        lines.append(f'{mark} {text}')
+
+    if not os.path.isdir(DIST):
+        return '❌ 还没有 dist/ 产物，先点「重新构建站点」'
+
+    # 1) 关键文件
+    lines.append('【关键产物】')
+    for rel in ('index.html', os.path.join('assets', 'style.css'), os.path.join('assets', 'app.js'),
+                os.path.join('assets', 'photoswipe-extra.css'), 'search-index.json',
+                'sitemap.xml', 'feed.xml', 'robots.txt', '404.html', '_headers'):
+        p = os.path.join(DIST, rel)
+        size = os.path.getsize(p) if os.path.exists(p) else 0
+        add(size > 0, f'{rel}（{size} 字节）' if size else f'{rel} 缺失或为空')
+
+    # 2) 各页面引用的资源版本是否一致 + 文件是否真的存在（混版/半成品检测）
+    lines.append('')
+    lines.append('【资源引用一致性】')
+
+    def resolve_ref(page_path, ref):
+        """按浏览器规则把引用解析成磁盘路径：/x → 站根；多余的 .. 夹在站根（不能上到域名之上）"""
+        clean = ref.split('?')[0].split('#')[0]
+        if clean.startswith('/'):
+            cand = os.path.normpath(os.path.join(DIST, clean.lstrip('/')))
+        else:
+            cand = os.path.normpath(os.path.join(os.path.dirname(page_path), clean.replace('/', os.sep)))
+        root = os.path.normpath(DIST)
+        if not cand.startswith(root):
+            tail = os.path.relpath(cand, root).replace('\\', '/')
+            parts = [p for p in tail.split('/') if p not in ('..', '.', '')]
+            cand = os.path.join(root, *parts)
+        return cand
+
+    vers, missing_ref, pages = {}, [], 0
+    for dirpath, _, names in os.walk(DIST):
+        for n in names:
+            if not n.endswith('.html'):
+                continue
+            pages += 1
+            p = os.path.join(dirpath, n)
+            try:
+                t = open(p, encoding='utf-8', errors='ignore').read(6000)
+            except OSError:
+                continue
+            for m in re.finditer(r'(?:href|src)="([^"]*assets/[^"?]+)(?:\?v=([^"]+))?"', t):
+                ref, v = m.group(1), m.group(2) or '(无版本)'
+                if '://' in ref or ref.startswith('//'):
+                    continue
+                key = ref.split('assets/', 1)[-1]
+                vers.setdefault(key, set()).add(v)
+                if not os.path.exists(resolve_ref(p, ref)):
+                    missing_ref.append(f'{os.path.relpath(p, DIST)} → {ref}')
+    for rel, vs in sorted(vers.items()):
+        add(len(vs) == 1, f'assets/{rel} 版本 {"、".join(sorted(vs))}' + ('' if len(vs) == 1 else f'（{len(vs)} 个不同版本 → 产物是新旧混合的）'), 'warn')
+    add(not missing_ref, f'共 {pages} 个页面，引用缺失的资源 {len(missing_ref)} 处'
+        + ('：' + '；'.join(missing_ref[:3]) if missing_ref else ''))
+
+    # 3) 图片抽样
+    lines.append('')
+    lines.append('【图片抽样】')
+    setdir = os.path.join(DIST, 'set')
+    slugs = sorted(os.listdir(setdir)) if os.path.isdir(setdir) else []
+    src_sets = [d for d in os.listdir(SETS_DIR) if os.path.isdir(os.path.join(SETS_DIR, d))]
+    add(len(slugs) == len(src_sets), f'dist 里有 {len(slugs)} 套图集，sets/ 里有 {len(src_sets)} 套'
+        + ('' if len(slugs) == len(src_sets) else '（不一致 → 可能没构建完）'))
+    picks = random.sample(slugs, min(3, len(slugs))) if slugs else []
+    for slug in picks:
+        thumb_dir = os.path.join(setdir, slug, 'thumbs')
+        thumbs = [f for f in os.listdir(thumb_dir) if f.endswith(('.webp', '.jpg'))] if os.path.isdir(thumb_dir) else []
+        ok = bool(thumbs) and all(os.path.getsize(os.path.join(thumb_dir, f)) > 1024 for f in thumbs[:2])
+        cover = os.path.exists(os.path.join(setdir, slug, 'cover.jpg'))
+        add(ok, f'{slug[:34]}：缩略图 {len(thumbs)} 个' + ('' if ok else '（缺失或异常小）')
+            + ('' if cover else ' · ⚠️ 无 cover.jpg'), 'bad' if not ok else 'warn')
+
+    # 4) 残留与规模
+    lines.append('')
+    lines.append('【其它】')
+    for leftover in ('dist.new', 'dist.old'):
+        p = os.path.join(ROOT, leftover)
+        if os.path.exists(p):
+            cnt = sum(len(f) for _, _, f in os.walk(p))
+            add(cnt == 0, f'{leftover}/ 残留 {cnt} 个文件（构建中断痕迹，可手动删除）', 'warn')
+    total = sum(len(f) for _, _, f in os.walk(DIST))
+    size_mb = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(DIST) for f in fs) / 1048576
+    lines.append(f'ℹ️ dist 共 {total} 个文件 / {size_mb:.0f} MB')
+    try:
+        with socket.create_connection(('127.0.0.1', 8090), timeout=0.4):
+            lines.append('ℹ️ 预览服务 8090 正在运行')
+    except OSError:
+        lines.append('⚠️ 预览服务 8090 没在运行（点「打开站点预览」前先跑 .\\preview.ps1）')
+        warn += 1
+
+    lines.append('')
+    lines.append(f'结论：{"✅ 一切正常" if not bad else f"❌ 发现 {bad} 个问题"}'
+                 + (f'，另有 {warn} 条提醒' if warn else ''))
+    return '\n'.join(lines)
+
+
 def rebuild():
     # 发布进行中禁止重建：deploy.py 正从 dist/ 读取上传，此时重建会换掉内容导致上传不一致
     if _pub['running']:
@@ -683,14 +796,15 @@ function rebuild(){toast('正在重建…');fetch('/rebuild',{method:'POST'}).th
 // ── 一键同步到线上（构建+体检+打包+上传，约 40 秒）──
 let pubTimer=null;
 function pubBox(){return document.getElementById('pubBox')}
+function pubTitle(t){var e=document.getElementById('pubTitle');if(e)e.textContent=t}
 function publishNow(){
   if(!confirm('把当前内容同步到线上？\\n\\n会执行：构建（精简·公网模式）→ 体检 → 打包 → 上传。\\n约 40 秒，只上传有变化的文件，线上访问不受影响。'))return;
   fetch('/publish',{method:'POST'}).then(r=>r.json()).then(d=>{
     toast(d.msg,d.started);
-    if(d.started){pubBox().hidden=false;pollPublish()}
+    if(d.started){pubTitle('发布到线上');pubBox().hidden=false;pollPublish()}
   }).catch(e=>toast('启动失败：'+e,false));
 }
-function publishLog(){pubBox().hidden=false;pollPublish()}
+function publishLog(){pubTitle('发布到线上');pubBox().hidden=false;pollPublish()}
 function pollPublish(){
   clearTimeout(pubTimer);
   const box=pubBox(),log=document.getElementById('pubLog'),msg=document.getElementById('pubMsg');
@@ -749,6 +863,7 @@ function pullAiTags(){document.querySelectorAll('.chip-ai').forEach(b=>addTagVal
 document.addEventListener('DOMContentLoaded',()=>{const v=document.getElementById('tagsValue');if(v){TAGS=(v.value||'').split(',').map(s=>s.trim()).filter(Boolean);renderTags()}const ti=document.getElementById('tagInput');if(ti){ti.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();addTag()}})}initDrag()});
 function backfill(){toast('正在补齐缩略图…');fetch('/backfill',{method:'POST'}).then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),1200)}).catch(e=>toast('失败：'+e,false))}
 function dupCheck(){toast('正在比对全库内容…');fetch('/dupcheck',{method:'POST'}).then(r=>r.text()).then(t=>{alert(t);toast('检查完成',true)}).catch(e=>toast('失败：'+e,false))}
+function healthCheck(){var b=document.getElementById('pubBox'),m=document.getElementById('pubMsg'),p=document.getElementById('pubLog');pubTitle('🩺 站点体检');b.hidden=false;m.textContent='正在体检…';p.textContent='';toast('正在体检站点…');fetch('/healthcheck',{method:'POST'}).then(r=>r.text()).then(function(t){p.textContent=t;var ok=t.indexOf('❌')<0;m.textContent=ok?'体检通过':'发现问题';toast(ok?'✅ 体检通过':'❌ 发现问题，看下方明细',ok)}).catch(function(e){p.textContent='体检失败：'+e;m.textContent='失败';toast('体检失败：'+e,false)})}
 // ── 以下为跨页面公共函数（编辑页/批量页/首页都会用到，必须放共享 JS，否则其他页面报 not defined）──
 const IMG_RE=/\.(jpe?g|png|webp|gif|bmp|tiff?)$/i;
 function readEntries(rd){return new Promise(res=>{const all=[];const step=()=>rd.readEntries(es=>{if(!es.length)return res(all);all.push(...es);step()});step()})}
@@ -1435,13 +1550,14 @@ def home_page(msg=''):
   <button class="btn ghost" onclick="detectResAll()">📐 自动检测所有图集像素</button>
   <button class="btn ghost" onclick="autotagAll()">🤖 批量自动打标（未打标的图集）</button>
   <button class="btn ghost" onclick="dupCheck()">🔍 查重复图集</button>
+  <button class="btn ghost" onclick="healthCheck()">🩺 站点体检</button>
   <a class="btn ghost" href="/tags">🏷 标签管理</a>
   <a class="btn ghost" href="/links">🔗 批量导入网盘链接</a>
   <a class="btn ghost" href="/batch">📚 批量导入文件夹（多套）</a>
   <a class="btn ghost" href="/models">👤 模特资料（按模特统一维护）</a>
   <a class="btn ghost" href="http://127.0.0.1:8090/" target="_blank">打开站点预览 ↗</a></div>
   <div class="pub" id="pubBox" hidden>
-    <div class="pub-head"><b>发布到线上</b><span id="pubMsg" class="sub" style="margin:0"></span></div>
+    <div class="pub-head"><b id="pubTitle">发布到线上</b><span id="pubMsg" class="sub" style="margin:0"></span></div>
     <pre id="pubLog"></pre>
   </div>
   <div class="pub" id="atBox" hidden>
@@ -2076,6 +2192,8 @@ class Handler(BaseHTTPRequestHandler):
                 ok, out = rebuild()
                 return self._text(f'已清理 {n} 张重复图片' if n else '没有发现重复图片')
             return self._text('图集不存在', 404)
+        if u.path == '/healthcheck':
+            return self._text(health_check())
         if u.path == '/dupcheck':
             groups = {}
             for s in list_sets():

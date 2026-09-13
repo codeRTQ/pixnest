@@ -31,3 +31,5 @@ venv/
 .DS_Store
 Thumbs.db
 Desktop.ini
+dist.new/
+dist.old/
