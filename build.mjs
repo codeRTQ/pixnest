@@ -458,7 +458,7 @@ function listPage(sets, page, totalPages, rel = '', total = sets.length) {
   })
 }
 
-function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}) {
+function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}, fillSet = null) {
   const rel = '../../'
   // 模特资料：仅展示填写过的字段（AI 不会生成这些）
   const pf = s.profile || {}
@@ -531,6 +531,17 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {})
         <figcaption>${i + 1} / ${s.imageCount}</figcaption>
       </figure>`
       }).join('')}
+      ${fillSet ? `<a class="preview fill-card" id="fillCard" data-fill="1" hidden
+         href="${rel}set/${fillSet.slug}/index.html" title="${esc(fillSet.title)}">
+        <img class="fill-img" alt="${esc(fillSet.title)}"
+             ${fillSet.coverFile ? `data-src="${rel}set/${fillSet.slug}/${fillSet.coverThumb ? 'thumbs/' + fillSet.coverThumb + verQ(fillSet.thumbVer[fillSet.coverThumb]) : fillSet.coverFile}"` : ''}>
+        <span class="fill-body">
+          <span class="fill-badge">猜你喜欢</span>
+          <b class="fill-title">${esc(fillSet.displayTitle || fillSet.title)}</b>
+          <span class="fill-meta">${esc(fillSet.model || '')}${fillSet.model ? ' · ' : ''}${fillSet.imageCount}P${fillSet.packSize ? ' · ' + esc(fillSet.packSize) : ''}</span>
+          <span class="fill-go">查看这套 →</span>
+        </span>
+      </a>` : ''}
     </div>
     <p class="stream-hint" id="streamHint">已加载 <span id="loadedCount">0</span> / ${s.previews.length} 张预览 · 滚动时自动加载 · <b>点击图片打开画廊</b>${s.olDir ? ` · 右上角「原图 ↗」直达原图` : ''}</p>
     ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张，以上为部分预览 · ${s.olDir ? `完整原图请到 <a href="${esc(s.olDir)}" target="_blank" rel="noopener">${esc(s.netdisk || 'OpenList')}</a> 查看` : (s.downloadUrl ? `完整图集请点上方下载按钮${s.netdisk ? `（${esc(s.netdisk)}）` : ''}` : '完整图集请下载压缩包')}</p>` : ''}`
@@ -749,6 +760,20 @@ img{max-width:100%;display:block}
 .preview-link{display:block;width:100%;height:100%;position:relative}
 .preview-link::after{content:'点击看原图';position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;padding:2px 8px;border-radius:999px;opacity:0;transition:opacity .2s}
 .preview:hover .preview-link::after{opacity:1}
+/* 瀑布流底部空隙填充卡（「猜你喜欢」）：把最后一行补满，底边与两侧列齐平 */
+.fill-card{display:flex;flex-direction:column;text-decoration:none;color:inherit;
+  background:var(--panel);border:1px solid var(--line);overflow:hidden}
+.fill-card[hidden]{display:none}
+.fill-card .fill-img{width:100%;flex:1 1 auto;min-height:0;height:auto;object-fit:cover;opacity:0;transition:opacity .4s ease}
+.fill-card.ready .fill-img{opacity:1}
+.fill-card .fill-body{flex:0 0 auto;display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-top:1px solid var(--line)}
+.fill-badge{align-self:flex-start;font-size:11px;line-height:1;padding:4px 9px;border-radius:999px;
+  background:rgba(91,140,255,.14);color:var(--accent);border:1px solid rgba(91,140,255,.32)}
+.fill-title{font-size:14px;line-height:1.45;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.fill-meta{font-size:12px;color:var(--dim)}
+.fill-go{font-size:13px;color:var(--accent);margin-top:2px}
+.fill-card:hover{border-color:var(--accent)}
+.fill-card:hover .fill-img{opacity:.92}
 /* 原图直链（OpenList）：右上角小胶囊 */
 .orig-link{position:absolute;top:8px;right:8px;z-index:2;background:rgba(0,0,0,.62);color:#fff;font-size:12px;line-height:1;padding:6px 10px;border-radius:999px;text-decoration:none;opacity:.9;transition:opacity .2s,background .2s;backdrop-filter:blur(4px)}
 .orig-link:hover{opacity:1;background:var(--accent);color:#fff}
@@ -1014,7 +1039,11 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
   if (gallery) {
     const GAP = 16;
     const MIN_COL = 300;          // 单列最小宽度（决定列数）
-    const items = [...gallery.querySelectorAll('.preview')];
+    const BAND_HOLE = 140;        // 跨列时允许留下的空隙上限（小空隙靠错位消化）
+    const BAND_HOLE_LAST = 400;   // 最后一张横图放宽：空隙交给「猜你喜欢」填充卡补满
+    const MIN_FILL = 180;         // 填充卡最小高度，低于此值就不放了
+    const items = [...gallery.querySelectorAll('.preview:not(.fill-card)')];
+    const fillCard = gallery.querySelector('.fill-card');
     let cols = 1, colW = 0;
 
     const metrics = () => {
@@ -1024,11 +1053,16 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     };
 
     // 按 DOM 顺序一次排完：短列优先；横构图尝试跨双列（跨列会留长条空隙时退回单列）
+    // 同时记录每个「跨列留下的空隙」，最后用填充卡把最大的一块补满 → 底部永远是齐的
     const layout = () => {
       metrics();
       const hh = new Array(cols).fill(0);
-      items.forEach(el => {
+      const placed = [];
+      const gaps = [];
+      if (fillCard) { fillCard.hidden = true; fillCard.classList.remove('placed'); }
+      items.forEach((el, idx) => {
         const ratio = parseFloat(el.dataset.ratio) || 0.75;
+        const isLast = idx === items.length - 1;
         let span = (cols >= 2 && ratio >= 1.25) ? 2 : 1;
         let col = 0, y = Infinity;
         if (span === 2) {
@@ -1037,11 +1071,16 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
             if (yy < y) { y = yy; col = c; }
           }
           const single = Math.min(...hh);
-          if (y - single > 140) { span = 1; }   // 退回单列，避免跨列下方留长条空隙
+          const limit = isLast ? BAND_HOLE_LAST : BAND_HOLE;
+          if (y - single > limit) { span = 1; }   // 退回单列，避免跨列下方留长条空隙
         }
         if (span === 1) {
           y = Math.min(...hh);
           col = hh.indexOf(y);
+        } else {
+          for (let i = col; i < col + span && i < cols; i++) {
+            if (hh[i] < y) gaps.push({ col: i, y: hh[i], h: y - hh[i] });
+          }
         }
         const w = colW * span + GAP * (span - 1);
         const h = Math.round(w / ratio);
@@ -1049,8 +1088,33 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         el.style.height = h + 'px';
         el.style.transform = 'translate(' + (col * (colW + GAP)) + 'px, ' + y + 'px)';
         el.classList.add('placed');
+        placed.push({ col, span, bottom: y + h });
         for (let i = col; i < col + span && i < cols; i++) hh[i] = y + h + GAP;
       });
+      // 列底：每列最后一张图的下边缘
+      const colEnd = new Array(cols).fill(0);
+      placed.forEach(o => { for (let i = o.col; i < o.col + o.span && i < cols; i++) colEnd[i] = Math.max(colEnd[i], o.bottom); });
+      const maxEnd = Math.max(...colEnd), minEnd = Math.min(...colEnd);
+      if (maxEnd - minEnd > 0) gaps.push({ col: colEnd.indexOf(minEnd), y: minEnd, h: maxEnd - minEnd, end: true });  // 末尾参差
+      // 用「猜你喜欢」卡把最大的一块空隙补满 → 底边与列齐平（同大小时优先补底部）
+      const score = g => g.h + (g.end ? 120 : 0);
+      const best = gaps.filter(g => g.h >= MIN_FILL).sort((a, b) => score(b) - score(a))[0];
+      if (fillCard && best) {
+        fillCard.style.width = colW + 'px';
+        fillCard.style.height = Math.round(best.h) + 'px';
+        fillCard.style.transform = 'translate(' + (best.col * (colW + GAP)) + 'px, ' + best.y + 'px)';
+        fillCard.hidden = false;
+        fillCard.classList.add('placed');
+        if (!fillCard.dataset.done) {
+          fillCard.dataset.done = '1';
+          const fi = fillCard.querySelector('.fill-img');
+          if (fi && fi.dataset.src) {
+            const real = new Image();
+            real.onload = () => { fi.src = real.src; fillCard.classList.add('ready'); };
+            real.src = fi.dataset.src;
+          } else if (fi) { fillCard.classList.add('ready'); }
+        }
+      }
       const total = hh.length ? Math.max(...hh) : 0;
       gallery.style.height = Math.max(0, total - GAP) + 'px';
     };
@@ -1186,7 +1250,14 @@ function build() {
   sets.forEach((s, i) => {
     const outDir = join(DIST, 'set', s.slug)
     mkdirSync(outDir, { recursive: true })
-    writeFileSync(join(outDir, 'index.html'), detailPage(s, sets[i - 1], sets[i + 1], pageUrl(`set/${encodeURIComponent(s.slug)}/`), relatedSets(s, sets), byTag))
+    const related = relatedSets(s, sets)
+    // 瀑布流底部空隙的填充卡：优先同系列 → 同模特 → 任意；不与「相关推荐」重复
+    const relSlugs = new Set(related.map(x => x.slug))
+    const fillPool = sets.filter(x => x.slug !== s.slug && !relSlugs.has(x.slug))
+    const fillSet = fillPool.find(x => s.series && x.series === s.series)
+      || fillPool.find(x => s.model && x.model === s.model)
+      || fillPool[0] || null
+    writeFileSync(join(outDir, 'index.html'), detailPage(s, sets[i - 1], sets[i + 1], pageUrl(`set/${encodeURIComponent(s.slug)}/`), related, byTag, fillSet))
 
     // 预览图（原图；精简模式下不复制，改用缩略图作为大图）
     const imgOut = join(outDir, 'images')
