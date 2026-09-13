@@ -637,7 +637,10 @@ table.lk tr.bad td{color:#ff8a8a}
 """
 
 JS = """
-function toast(msg,ok){document.querySelectorAll('.toast').forEach(t=>t.remove());const d=document.createElement('div');d.className='toast '+(ok===undefined?'':(ok?'ok':'err'));d.textContent=msg;document.body.appendChild(d);if(ok!==undefined)setTimeout(()=>d.remove(),4500)}
+function toast(msg,ok){document.querySelectorAll('.toast').forEach(t=>t.remove());const d=document.createElement('div');d.className='toast '+(ok===undefined?'':(ok?'ok':'err'));d.textContent=String(msg).slice(0,400);document.body.appendChild(d);if(ok!==undefined)setTimeout(()=>d.remove(),4500)}
+// 任何脚本错误都弹出来，不要静默失败（本地工具，出错必须看得见）
+window.onerror=function(m,src,line,col){try{toast('页面脚本出错（第 '+line+' 行）：'+m,false)}catch(e){}return false};
+window.addEventListener('unhandledrejection',function(e){try{toast('页面脚本出错：'+((e.reason&&e.reason.message)||e.reason),false)}catch(x){}});
 function rebuild(){toast('正在重建…');fetch('/rebuild',{method:'POST'}).then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),900)}).catch(e=>toast('失败：'+e,false))}
 // ── 一键同步到线上（构建+体检+打包+上传，约 40 秒）──
 let pubTimer=null;
@@ -1615,6 +1618,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(body)))
+        # 后台是本地工具，页面/接口一律不缓存：否则改了代码浏览器还在跑旧页面
+        # （曾导致「按钮点了没反应」——页面里还是修复前的坏脚本）
+        self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
         self.end_headers()
         self.wfile.write(body)
 
