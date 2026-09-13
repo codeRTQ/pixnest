@@ -536,9 +536,12 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
       </figure>`
       }).join('')}
     </div>
-    <p class="stream-hint" id="streamHint">已加载 <span id="loadedCount">0</span> / ${s.previews.length} 张预览 · 滚动时自动加载 · <b>点击图片打开画廊</b>${s.olDir ? ` · 右上角「原图 ↗」直达原图` : ''}</p>
     ${s.imageCount > s.previews.length ? `<p class="more-hint">本套共 ${s.imageCount} 张，以上为部分预览 · ${s.olDir ? `完整原图请到 <a href="${esc(s.olDir)}" target="_blank" rel="noopener">${esc(s.netdisk || 'OpenList')}</a> 查看` : (s.downloadUrl ? `完整图集请点上方下载按钮${s.netdisk ? `（${esc(s.netdisk)}）` : ''}` : '完整图集请下载压缩包')}</p>` : ''}`
     : '<p class="empty">暂无预览图</p>'
+  // 加载进度提示：原来在预览区下面，现在提到预览区上方（原来「预览图（8 / 32）」标题的位置）
+  const streamHint = s.previews.length
+    ? `<p class="stream-hint top" id="streamHint">已加载 <span id="loadedCount">0</span> / ${s.previews.length} 张预览 · 滚动时自动加载 · <b>点击图片打开画廊</b>${s.olDir ? ' · 右上角「原图 ↗」直达原图' : ''}</p>`
+    : ''
 
   // ── 右侧栏（参考同类站：下载 / 模特与系列 / 本套信息 / 热门标签）──
   const dlBtn = s.olDir
@@ -623,7 +626,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
       ${s.tags.map(t => `<a class="tag tag-link" href="${rel}tag/${encodeURIComponent(t)}.html" title="查看同标签图集">#${esc(t)}</a>`).join('')}
     </div>
     ${s.description ? `<p class="detail-desc">${esc(s.description)}</p>` : ''}
-    <h2 class="sec-title">预览图<span class="dim">（${s.previews.length} / ${s.imageCount}）</span></h2>
+    ${streamHint}
     ${previews}
     <nav class="prevnext">
       ${prev ? `<a class="pn" href="${rel}set/${prev.slug}/index.html"><small>上一套</small><span>${esc(prev.title)}</span></a>` : '<span class="pn dim">已是第一套</span>'}
@@ -772,6 +775,9 @@ img{max-width:100%;display:block}
 .dl-hint{color:var(--dim);font-size:13px}
 .dl-hint code{background:var(--panel2);padding:2px 6px;border-radius:6px}
 .stream-hint{color:var(--dim);text-align:center;font-size:13px;margin:14px 0}
+/* 预览区上方那行（原来在下面，且顶掉了「预览图（8 / 32）」标题） */
+.stream-hint.top{text-align:left;margin:0 0 12px;padding-left:11px;border-left:3px solid var(--accent);line-height:1.7}
+.stream-hint.top b{color:var(--fg);font-weight:600}
 .tag-link{text-decoration:none;transition:.15s}
 .tag-link:hover{color:var(--accent);border-color:var(--accent);background:rgba(91,140,255,.12)}
 /* 首页/列表页卡片标签：系列与标签都可点，跳到对应的系列页/标签页 */
