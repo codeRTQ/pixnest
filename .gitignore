@@ -1,5 +1,6 @@
 # 内容与构建产物（体积大、涉及版权，不入库）
 sets/
+models/
 dist/
 deploy/
 _trash/

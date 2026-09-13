@@ -1098,6 +1098,88 @@ def esc_attr(s):
             .replace('"', '&quot;').replace("'", '&#39;'))
 
 
+def models_page(msg=''):
+    """模特资料：按模特统一维护（models/<模特>.json），改一次该模特全部图集生效"""
+    by_model = {}
+    for s in list_sets():
+        m = (s['meta'].get('model') or '').strip()
+        if m:
+            by_model.setdefault(m, []).append(s['slug'])
+    if not by_model:
+        return page('模特资料', '<a class="btn ghost sm" href="/">← 返回后台</a>'
+                    '<div class="panel"><h2>模特资料</h2><p class="sub">还没有图集填写「模特」字段。'
+                    '在编辑页填上模特名，这里就能按模特统一维护资料。</p></div>')
+
+    FIELDS = [
+        ('birth', '出生', '如 1998 年'), ('sign', '星座', '如 巨蟹座'), ('city', '常驻', '如 广东深圳'),
+        ('height', '身高', '如 168cm'), ('weight', '体重', '如 45kg'), ('measure', '三围', '如 86-60-88'),
+        ('shoes', '鞋码', '如 37'), ('style', '风格', '如 清纯甜美'),
+        ('weibo', '微博', '如 @许岚LAN'), ('douyin', '抖音', '如 许岚lan'),
+        ('bilibili', 'B站', '选填'), ('xhs', '小红书', '选填'), ('other', '其他', '籍贯/特长等'),
+    ]
+    blocks = []
+    for model, slugs in sorted(by_model.items(), key=lambda kv: -len(kv[1])):
+        pf = read_model_profile(model)
+        inputs = ''.join(
+            f'<div><label>{label}</label><input type="text" data-f="{k}" value="{esc_attr(pf.get(k, ""))}" placeholder="{ph}"></div>'
+            for k, label, ph in FIELDS)
+        blocks.append(f"""<div class="panel" data-model="{esc_attr(model)}">
+  <h2>👤 {esc_attr(model)} <span class="sub" style="font-weight:400">· {len(slugs)} 套图集共用这份资料</span></h2>
+  <div class="grid2">{inputs}</div>
+  <div class="row" style="margin-top:12px">
+    <button class="btn" onclick="saveModel(this)">保存并重建</button>
+    <button class="btn danger sm" onclick="clearModel(this)">清空资料</button>
+    <span class="sub mstate" style="margin:0"></span>
+  </div>
+</div>""")
+    return page('模特资料', f"""
+<a class="btn ghost sm" href="/">← 返回后台</a>
+<div class="panel"><h2>模特资料（按模特统一维护）</h2>
+  <p class="sub">这里改一次，该模特名下<b>所有图集</b>都生效，不用一套套改。留空的字段不会展示。<br>
+    如果某套图集需要特殊资料，可在该图集的编辑页单独填写（会覆盖这里的值）。</p>
+</div>
+{''.join(blocks)}""", extra_js="""
+function collectModel(box){const o={};box.querySelectorAll('input[data-f]').forEach(function(i){const v=i.value.trim();if(v)o[i.dataset.f]=v});return o}
+function saveModel(btn){
+  const box=btn.closest('.panel'),model=box.dataset.model,profile=collectModel(box);
+  btn.disabled=true;const st=box.querySelector('.mstate');st.textContent='保存并重建中…';
+  fetch('/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:model,profile:profile})})
+    .then(function(r){return r.text()}).then(function(t){toast(t,true);st.textContent=t;btn.disabled=false})
+    .catch(function(e){toast('失败：'+e,false);st.textContent='';btn.disabled=false});
+}
+function clearModel(btn){
+  const box=btn.closest('.panel'),model=box.dataset.model;
+  if(!confirm('清空「'+model+'」的全部资料？（该模特名下所有图集都不再展示资料）'))return;
+  box.querySelectorAll('input[data-f]').forEach(function(i){i.value=''});
+  saveModel(box.querySelector('.btn'));
+}
+""")
+
+
+def read_model_profile(model):
+    """读取 models/<模特>.json"""
+    safe = str(model).strip().replace('/', '_').replace('\\\\', '_')
+    p = os.path.join(ROOT, 'models', safe + '.json')
+    if not os.path.isfile(p):
+        return {}
+    try:
+        return json.load(open(p, encoding='utf-8'))
+    except Exception:  # noqa
+        return {}
+
+
+def write_model_profile(model, profile):
+    safe = str(model).strip().replace('/', '_').replace('\\\\', '_')
+    d = os.path.join(ROOT, 'models')
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, safe + '.json')
+    if profile:
+        json.dump(profile, open(p, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+    elif os.path.exists(p):
+        os.remove(p)
+    return p
+
+
 def all_tags():
     """汇总全站标签 → {标签: [使用它的图集slug...]}"""
     out = {}
@@ -1318,6 +1400,7 @@ def home_page(msg=''):
   <a class="btn ghost" href="/tags">🏷 标签管理</a>
   <a class="btn ghost" href="/links">🔗 批量导入网盘链接</a>
   <a class="btn ghost" href="/batch">📚 批量导入文件夹（多套）</a>
+  <a class="btn ghost" href="/models">👤 模特资料（按模特统一维护）</a>
   <a class="btn ghost" href="http://127.0.0.1:8090/" target="_blank">打开站点预览 ↗</a></div>
   <div class="pub" id="pubBox" hidden>
     <div class="pub-head"><b>发布到线上</b><span id="pubMsg" class="sub" style="margin:0"></span></div>
@@ -1713,6 +1796,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(links_page())
         if u.path == '/batch':
             return self._html(batch_page())
+        if u.path == '/models':
+            return self._html(models_page())
         if u.path == '/publish/status':
             return self._json(publish_status())
         if u.path == '/autotag-status':
@@ -1978,6 +2063,18 @@ class Handler(BaseHTTPRequestHandler):
             d = self._json_body()
             started, msg = autotag_batch_start(force=bool(d.get('force')), limit=int(d.get('limit') or 0))
             return self._json({'started': started, 'msg': msg}, 200 if started else 409)
+        if u.path == '/models':
+            d = self._json_body()
+            model = (d.get('model') or '').strip()
+            if not model:
+                return self._text('缺少模特名', 400)
+            prof = {k: str(v).strip() for k, v in (d.get('profile') or {}).items() if str(v).strip()}
+            write_model_profile(model, prof)
+            ok, out = rebuild()
+            n = sum(1 for s in list_sets() if (s['meta'].get('model') or '').strip() == model)
+            first = next((l for l in (out or '').splitlines() if l.strip()), '')
+            return self._text(f'✓ 「{model}」资料已保存（{len(prof)} 个字段），影响 {n} 套图集\n'
+                              f'  {"站点已重建：" + first if ok else "站点重建失败：" + (out or "")[:160]}')
         if u.path == '/backfill':
             total = 0
             for s in list_sets():

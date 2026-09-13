@@ -199,6 +199,15 @@ function olFileUrl(s, fileName) {
   return String(OL.base).replace(/\/+$/, '') + pre + '/' + encPath(d + '/' + fileName)
 }
 
+/** 模特资料：按模特统一维护（models/<模特>.json），单套图集可在 meta.profile 里覆盖个别字段
+ *  好处：改一次该模特名下所有图集都生效，不用一套套改 */
+function modelProfile(model) {
+  if (!model) return {}
+  const safe = String(model).replace(/[\\/:*?"<>|]/g, '_').trim()
+  if (!safe) return {}
+  try { return JSON.parse(readFileSync(join(ROOT, 'models', safe + '.json'), 'utf8')) } catch { return {} }
+}
+
 function readSet(slug) {
   const dir = join(SETS_DIR, slug)
   const metaPath = join(dir, 'meta.json')
@@ -275,7 +284,7 @@ function readSet(slug) {
     hasThumbs,
     lqip,
     modelInfo: meta.modelInfo || '',
-    profile: meta.profile || null,
+    profile: { ...modelProfile(model), ...(meta.profile || {}) },
     openlistDir: meta.openlistDir || '',
     sizes: Object.fromEntries(images.map(f => [f, imageSize(join(dir, 'images', f))])),
     previews: images.slice(0, meta.previewCount || config.previewCount),
