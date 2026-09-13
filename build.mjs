@@ -499,8 +499,9 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
     return `${pfSocial[k]} ${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}`
   })
   const pfText = pfParts.join(' · ')
+  // 模特资料引文：搬到右侧栏「👤 模特与系列」里（原来是放在正文顶部）
   const profileBlock = (pfText || pfSocialItems.length)
-    ? `<blockquote class="pf-quote">${pfText ? `<p>${esc(pfText)}</p>` : ''}${pfSocialItems.length ? `<p class="pf-social">${pfSocialItems.join(' · ')}</p>` : ''}</blockquote>`
+    ? `<blockquote class="pf-quote side-quote">${pfText ? `<p>${esc(pfText)}</p>` : ''}${pfSocialItems.length ? `<p class="pf-social">${pfSocialItems.join(' · ')}</p>` : ''}</blockquote>`
     : ''
 
   const previews = s.previews.length
@@ -567,10 +568,12 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
     </section>
     ${(s.model || s.series) ? `<section class="side-box">
       <h3 class="side-title">👤 模特与系列</h3>
-      <div class="side-links">
+      ${profileBlock
+        ? `<p class="side-sub first">模特信息${s.model ? `<span class="dim"> · ${esc(s.model)}</span>` : ''}</p>${profileBlock}`
+        : `<div class="side-links">
         ${s.model ? `<a class="side-link" href="${rel}index.html?q=${encodeURIComponent(s.model)}">${esc(s.model)} <span class="dim">的全部作品${modelTotal > 1 ? `（${modelTotal} 套）` : ''}</span></a>` : ''}
-        ${s.series ? `<a class="side-link" href="${rel}series/${encodeURIComponent(s.series)}.html">${esc(s.series)} <span class="dim">系列全部</span></a>` : ''}
-      </div>
+      </div>`}
+      ${s.series ? `<div class="side-links"><a class="side-link" href="${rel}series/${encodeURIComponent(s.series)}.html">${esc(s.series)} <span class="dim">系列全部</span></a></div>` : ''}
       ${moreSets.length ? `<div class="side-sets">
         <p class="side-sub">${esc(s.model || s.series)} 的其他作品</p>
         ${moreSets.map(x => `<a class="side-set" href="${rel}set/${x.slug}/index.html" title="${esc(x.title)}">
@@ -619,7 +622,6 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
       ${s.model ? `<a class="tag tag-model" href="${rel}index.html?q=${encodeURIComponent(s.model)}" title="查看该模特全部图集">模特：${esc(s.model)}</a>` : ''}
       ${s.tags.map(t => `<a class="tag tag-link" href="${rel}tag/${encodeURIComponent(t)}.html" title="查看同标签图集">#${esc(t)}</a>`).join('')}
     </div>
-    ${profileBlock}
     ${s.description ? `<p class="detail-desc">${esc(s.description)}</p>` : ''}
     <h2 class="sec-title">预览图<span class="dim">（${s.previews.length} / ${s.imageCount}）</span></h2>
     ${previews}
@@ -791,6 +793,15 @@ img{max-width:100%;display:block}
 .side-dl-wrap{margin:0 0 8px}
 /* 侧栏：模特的其他作品（缩略图 + 标题 + 日期/张数） */
 .side-sub{margin:12px 0 8px;font-size:12px;color:var(--dim);border-top:1px solid var(--line);padding-top:10px}
+.side-sub.first{margin-top:0;border-top:0;padding-top:0}
+/* 侧栏里的模特资料引文（原正文顶部的那段，搬进侧栏后收紧排版）
+   用 .pf-quote.side-quote 提高权重，否则会被后面的 .pf-quote 覆盖 */
+.pf-quote.side-quote{margin:0 0 4px;padding:8px 0 8px 11px;font-size:12.5px;line-height:1.9;
+  border-left:3px solid var(--accent2);background:linear-gradient(90deg,rgba(255,180,84,.10),transparent 70%)}
+/* 亮色主题下 .pf-quote 有自己的背景规则，权重更高，这里单独再盖一次 */
+html[data-theme="light"] .pf-quote.side-quote{background:linear-gradient(90deg,rgba(255,180,84,.16),transparent 70%)}
+.pf-quote.side-quote p{margin:0}
+.pf-quote.side-quote p + p{margin-top:5px}
 .side-sets{display:flex;flex-direction:column;gap:4px}
 .side-set{display:flex;gap:9px;align-items:center;padding:5px 6px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
 .side-set:hover{background:var(--panel2)}
