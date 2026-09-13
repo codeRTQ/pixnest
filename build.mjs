@@ -505,8 +505,7 @@ function heroHtml(pinned, rel = '') {
       <span class="hero-info">
         <span class="hero-badge">📌 置顶推荐</span>
         <h2>${esc(s.title)}</h2>
-        <span class="hero-meta">${[s.model, `${s.imageCount} 张`, s.sizeText, s.tags.slice(0, 3).join(' · ')].filter(Boolean).map(esc).join(' ｜ ')}</span>
-        <span class="hero-cta">查看图集 →</span>
+        <span class="hero-meta">${[s.model, `${s.imageCount} 张`, s.sizeText].filter(Boolean).map(esc).join(' · ')}</span>
       </span>
     </a>`).join('')
   const multi = pinned.length > 1
@@ -975,12 +974,14 @@ img{max-width:100%;display:block}
 .hero-slide{position:absolute;inset:0;display:block;opacity:0;transition:opacity .55s ease;text-decoration:none;color:#fff;pointer-events:none}
 .hero-slide.on{opacity:1;pointer-events:auto}
 .hero-slide img{width:100%;height:100%;object-fit:cover;object-position:center 22%;display:block}
-.hero-slide::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.15) 0%,rgba(0,0,0,.25) 45%,rgba(0,0,0,.82) 100%)}
-.hero-info{position:absolute;left:18px;right:18px;bottom:14px;z-index:2;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
-.hero-badge{background:rgba(255,180,84,.92);color:#1a1206;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px}
-.hero-info h2{margin:0;font-size:18px;line-height:1.3;text-shadow:0 2px 12px rgba(0,0,0,.55)}
-.hero-meta{color:rgba(255,255,255,.86);font-size:12.5px;text-shadow:0 1px 8px rgba(0,0,0,.5)}
-.hero-cta{background:var(--accent);color:#fff;padding:5px 14px;border-radius:999px;font-size:12.5px;margin-top:1px}
+.hero-slide::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05) 0%,rgba(0,0,0,.2) 45%,rgba(0,0,0,.78) 100%)}
+.hero-slide:hover img{filter:brightness(1.06)}
+/* 文字块：宽松排版（去掉 CTA 后只留 角标 / 标题 / 信息 三行） */
+.hero-info{position:absolute;left:22px;right:22px;bottom:20px;z-index:2;display:flex;flex-direction:column;gap:9px;align-items:flex-start}
+.hero-badge{align-self:flex-start;background:rgba(255,180,84,.92);color:#1a1206;font-size:12px;font-weight:600;
+  padding:3px 11px;border-radius:999px;letter-spacing:.02em}
+.hero-info h2{margin:0;font-size:19px;line-height:1.45;letter-spacing:.01em;text-shadow:0 2px 12px rgba(0,0,0,.55)}
+.hero-meta{color:rgba(255,255,255,.88);font-size:12.5px;line-height:1.6;letter-spacing:.02em;text-shadow:0 1px 8px rgba(0,0,0,.5)}
 .hero-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:32px;height:32px;border-radius:50%;
   border:1px solid rgba(255,255,255,.35);background:rgba(0,0,0,.45);color:#fff;font-size:17px;line-height:1;cursor:pointer;backdrop-filter:blur(4px)}
 .hero-nav:hover{background:rgba(0,0,0,.7)}
