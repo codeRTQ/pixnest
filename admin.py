@@ -270,6 +270,72 @@ def publish_status():
             'site': SITE_URL, 'project': PAGES_PROJECT}
 
 
+# ─────────────────── 批量自动打标（后台线程 + 实时进度） ───────────────────
+_at_lock = threading.Lock()
+_at = {'running': False, 'total': 0, 'done': 0, 'skipped': 0, 'failed': 0, 'current': '',
+       'log': [], 'started': 0.0, 'ended': 0.0, 'forced': False}
+
+
+def autotag_batch_start(force=False, limit=0):
+    """后台批量打标；force=True 连已打标的也重打，limit>0 只处理前 N 套"""
+    with _at_lock:
+        if _at['running']:
+            return False, '已有打标任务在进行中'
+        todo = []
+        for s in list_sets():
+            m = s['meta']
+            if not force and (m.get('tags') or []) and m.get('autoTags'):
+                continue
+            todo.append(s)
+        if limit > 0:
+            todo = todo[:limit]
+        if not todo:
+            return False, '没有需要打标的图集（都已经打过了）'
+        _at.update({'running': True, 'total': len(todo), 'done': 0, 'skipped': 0, 'failed': 0,
+                    'current': '', 'log': [], 'started': time.time(), 'ended': 0.0,
+                    'forced': bool(force)})
+
+    def run():
+        # 免费视觉接口每个模型限 2 次/分钟，连打必然 429 → 失败的排队重试，而不是直接放弃
+        queue = [(s, 0) for s in todo]
+        while queue:
+            s, tries = queue.pop(0)
+            title = s['meta'].get('title') or s['slug']
+            _at['current'] = title + (f'（重试 {tries}）' if tries else '')
+            try:
+                n, info, _ = autotag_set(os.path.join(SETS_DIR, s['slug']), samples=3)
+                if n:
+                    _at['done'] += 1
+                    _at['log'].append(f'✓ {title}：{str(info)[:70]}')
+                else:
+                    _at['skipped'] += 1
+                    _at['log'].append(f'– {title}：跳过（{str(info)[:50]}）')
+                time.sleep(4)            # 成功也稍作停顿，平摊请求频率
+            except Exception as e:  # noqa
+                if tries < 2:
+                    queue.append((s, tries + 1))
+                    _at['retrying'] = _at.get('retrying', 0) + 1
+                    _at['log'].append(f'↻ {title}：{e} → 等待限流窗口恢复后重试')
+                    time.sleep(50)       # 退避：等 429 窗口过去
+                    continue
+                _at['failed'] += 1
+                _at['log'].append(f'✗ {title}：{e}（已重试 {tries} 次）')
+                time.sleep(4)
+        _at['current'] = ''
+        _at['running'] = False
+        _at['ended'] = time.time()
+
+    threading.Thread(target=run, daemon=True).start()
+    return True, f'已开始打标 {len(todo)} 套（可实时看进度，关闭页面不会中断）'
+
+
+def autotag_status():
+    st = dict(_at)
+    st['elapsed'] = int((_at['ended'] or time.time()) - _at['started']) if _at['started'] else 0
+    st['log'] = _at['log'][-200:]
+    return st
+
+
 def read_meta(set_dir):
     mp = os.path.join(set_dir, 'meta.json')
     if os.path.exists(mp):
@@ -596,7 +662,33 @@ function setCover(slug,img){if(!confirm('把 '+img+' 设为封面？'))return;po
 function delImage(slug,img){if(!confirm('删除图片 '+img+' ？不可恢复'))return;post('/deleteimage',{slug,img},'/edit?slug='+encodeURIComponent(slug))}
 function dedupe(slug){if(!confirm('按内容清理重复图片（保留每组的第一张）？'))return;post('/dedupe',{slug},'/edit?slug='+encodeURIComponent(slug))}
 function autotag(slug,force){toast('🤖 正在分析样图（约 10-30 秒）…');fetch('/autotag',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug,force:!!force,samples:3})}).then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),1600)}).catch(e=>toast('失败：'+e,false))}
-function autotagAll(){if(!confirm('对未打标的图集批量自动打标？（每套约 10-30 秒）'))return;toast('批量分析中，请勿关闭页面…');fetch('/autotag-all',{method:'POST'}).then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),2500)}).catch(e=>toast('失败：'+e,false))}
+let atTimer=null;
+function autotagAll(){
+  if(!confirm('对未打标的图集批量自动打标？\\n\\n每套约 4-30 秒，下方会实时显示进度；\\n任务跑在服务端，中途关掉页面也不会中断。'))return;
+  fetch('/autotag-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({force:false})})
+    .then(r=>r.json()).then(d=>{toast(d.msg,d.started);if(d.started){document.getElementById('atBox').hidden=false;pollAutotag()}})
+    .catch(e=>toast('启动失败：'+e,false));
+}
+function pollAutotag(){
+  clearTimeout(atTimer);
+  const log=document.getElementById('atLog'),msg=document.getElementById('atMsg'),bar=document.getElementById('atBar');
+  fetch('/autotag-status').then(r=>r.json()).then(d=>{
+    log.textContent=(d.log||[]).join('\\n');log.scrollTop=log.scrollHeight;
+    const fin=(d.done||0)+(d.skipped||0)+(d.failed||0);
+    const pct=d.total?Math.round(fin/d.total*100):0;
+    bar.style.width=pct+'%';
+    if(d.running){
+      msg.textContent='⏳ '+pct+'%（'+fin+'/'+d.total+'）· 正在处理：'+(d.current||'…')+
+        ' · 成功 '+d.done+' · 跳过 '+d.skipped+' · 失败 '+d.failed+' · 已用 '+d.elapsed+' 秒';
+      atTimer=setTimeout(pollAutotag,2000);
+    }else if(d.total){
+      msg.innerHTML='✅ 完成：成功 '+d.done+' 套'+(d.skipped?('，跳过 '+d.skipped):'')+(d.failed?('，失败 '+d.failed):'')+
+        ' · 用时 '+d.elapsed+' 秒 · <a href="/">刷新列表</a> <span class="sub">（打标后要点「🚀 同步到线上」才会显示在站点上）</span>';
+    }else{msg.textContent='还没有打标任务'}
+  }).catch(()=>{atTimer=setTimeout(pollAutotag,3000)});
+}
+// 进页面时若正在打标，自动接上进度
+fetch('/autotag-status').then(r=>r.json()).then(d=>{if(d.running){document.getElementById('atBox').hidden=false;pollAutotag()}}).catch(()=>{});
 function detectRes(slug){toast('📐 正在读取图片尺寸…');post('/detectres',{slug},'/edit?slug='+encodeURIComponent(slug))}
 function detectResAll(){toast('正在检测所有图集…');fetch('/detectres-all',{method:'POST'}).then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),1200)}).catch(e=>toast('失败：'+e,false))}
 // 标签芯片编辑
@@ -1140,6 +1232,11 @@ def home_page(msg=''):
   <div class="pub" id="pubBox" hidden>
     <div class="pub-head"><b>发布到线上</b><span id="pubMsg" class="sub" style="margin:0"></span></div>
     <pre id="pubLog"></pre>
+  </div>
+  <div class="pub" id="atBox" hidden>
+    <div class="pub-head"><b>批量自动打标</b><span id="atMsg" class="sub" style="margin:0"></span></div>
+    <div class="progress" id="atWrap"><div class="bar" id="atBar"></div></div>
+    <pre id="atLog"></pre>
   </div></div>"""
     extra = """
 const drop=document.getElementById('drop'),imgs=document.getElementById('imgs'),files=document.getElementById('files');
@@ -1431,12 +1528,19 @@ def edit_page(slug, msg=''):
     </div>
     <div><label style="margin-top:12px">模特资料（选填 · 填了才在详情页展示 · AI 不会自动生成这些）</label></div>
     <div class="grid2">
-      <div><label>年龄</label><input type="text" name="p_age" value="{pf.get('age','')}" placeholder="如 22 或 22岁"></div>
-      <div><label>身高</label><input type="text" name="p_height" value="{pf.get('height','')}" placeholder="如 165cm"></div>
+      <div><label>出生</label><input type="text" name="p_birth" value="{pf.get('birth','')}" placeholder="如 1998"></div>
+      <div><label>星座</label><input type="text" name="p_sign" value="{pf.get('sign','')}" placeholder="如 巨蟹座"></div>
+      <div><label>常驻</label><input type="text" name="p_city" value="{pf.get('city','')}" placeholder="如 广东深圳"></div>
+      <div><label>身高</label><input type="text" name="p_height" value="{pf.get('height','')}" placeholder="如 168cm"></div>
       <div><label>体重</label><input type="text" name="p_weight" value="{pf.get('weight','')}" placeholder="如 45kg"></div>
       <div><label>三围</label><input type="text" name="p_measure" value="{pf.get('measure','')}" placeholder="如 86-60-88"></div>
       <div><label>鞋码</label><input type="text" name="p_shoes" value="{pf.get('shoes','')}" placeholder="如 37"></div>
-      <div><label>其他（籍贯/星座/特长等）</label><input type="text" name="p_other" value="{pf.get('other','')}" placeholder="选填"></div>
+      <div><label>风格</label><input type="text" name="p_style" value="{pf.get('style','')}" placeholder="如 清纯甜美"></div>
+      <div><label>微博</label><input type="text" name="p_weibo" value="{pf.get('weibo','')}" placeholder="如 @许岚LAN"></div>
+      <div><label>抖音</label><input type="text" name="p_douyin" value="{pf.get('douyin','')}" placeholder="如 许岚lan"></div>
+      <div><label>B站</label><input type="text" name="p_bilibili" value="{pf.get('bilibili','')}" placeholder="选填"></div>
+      <div><label>小红书</label><input type="text" name="p_xhs" value="{pf.get('xhs','')}" placeholder="选填"></div>
+      <div><label>其他（籍贯/特长等）</label><input type="text" name="p_other" value="{pf.get('other','')}" placeholder="选填"></div>
     </div>
     <div><label style="margin-top:12px">图集简介（选填 · 不填则不显示）</label><textarea name="description" rows="2" placeholder="留空即不展示（推荐留空，让访客直接看图）">{m.get('description','')}</textarea></div>
   <div class="row" style="margin-top:10px">
@@ -1557,6 +1661,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(batch_page())
         if u.path == '/publish/status':
             return self._json(publish_status())
+        if u.path == '/autotag-status':
+            return self._json(autotag_status())
         if u.path.startswith('/preview/'):
             from urllib.parse import unquote
             return self._serve_file(unquote(u.path[len('/preview/'):]))
@@ -1814,6 +1920,10 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/publish':
             started, msg = publish_start()
             return self._json({'started': started, 'msg': msg}, 200 if started else 409)
+        if u.path == '/autotag-batch':
+            d = self._json_body()
+            started, msg = autotag_batch_start(force=bool(d.get('force')), limit=int(d.get('limit') or 0))
+            return self._json({'started': started, 'msg': msg}, 200 if started else 409)
         if u.path == '/backfill':
             total = 0
             for s in list_sets():
@@ -2061,8 +2171,11 @@ class Handler(BaseHTTPRequestHandler):
             'password': g('password'), 'netdisk': g('netdisk'), 'resolution': g('resolution'),
             'description': g('description'),
             'profile': {k: v for k, v in {
-                'age': g('p_age'), 'height': g('p_height'), 'weight': g('p_weight'),
-                'measure': g('p_measure'), 'shoes': g('p_shoes'), 'other': g('p_other'),
+                'birth': g('p_birth'), 'sign': g('p_sign'), 'city': g('p_city'),
+                'height': g('p_height'), 'weight': g('p_weight'),
+                'measure': g('p_measure'), 'shoes': g('p_shoes'), 'style': g('p_style'),
+                'weibo': g('p_weibo'), 'douyin': g('p_douyin'),
+                'bilibili': g('p_bilibili'), 'xhs': g('p_xhs'), 'other': g('p_other'),
             }.items() if v},
             'imageCount': len(set_images(set_dir)),
         })

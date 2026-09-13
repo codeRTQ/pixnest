@@ -445,10 +445,32 @@ function detailPage(s, prev, next, canonical = '', related = []) {
   const rel = '../../'
   // 模特资料：仅展示填写过的字段（AI 不会生成这些）
   const pf = s.profile || {}
-  const pfLabels = { age: '年龄', height: '身高', weight: '体重', measure: '三围', shoes: '鞋码', other: '其他' }
-  const pfItems = Object.keys(pfLabels).filter(k => pf[k]).map(k => `<div><dt>${pfLabels[k]}</dt><dd>${esc(pf[k])}</dd></div>`)
-  const profileBlock = pfItems.length
-    ? `<section class="profile"><h3 class="pf-title">模特资料</h3><dl class="pf-list">${pfItems.join('')}</dl></section>`
+  const pfLabels = {
+    birth: '出生', sign: '星座', city: '常驻', height: '身高', weight: '体重',
+    measure: '三围', shoes: '鞋码', style: '风格', other: '其他',
+  }
+  // 社交账号单独渲染成可点链接（微博/抖音等平台按关键词搜索，避免写错主页地址）
+  const pfSocial = { weibo: '微博', douyin: '抖音', x: 'X', ins: 'Instagram', bilibili: 'B站', xhs: '小红书' }
+  const socialUrl = (k, v) => {
+    const clean = String(v).replace(/^@/, '')
+    return {
+      weibo: 'https://s.weibo.com/weibo?q=' + encodeURIComponent(clean),
+      douyin: 'https://www.douyin.com/search/' + encodeURIComponent(clean),
+      bilibili: 'https://search.bilibili.com/all?keyword=' + encodeURIComponent(clean),
+      xhs: 'https://www.xiaohongshu.com/search_result?keyword=' + encodeURIComponent(clean),
+      x: 'https://x.com/search?q=' + encodeURIComponent(clean),
+      ins: 'https://www.instagram.com/' + encodeURIComponent(clean),
+    }[k] || ''
+  }
+  const pfItems = Object.keys(pfLabels).filter(k => pf[k])
+    .map(k => `<div><dt>${pfLabels[k]}</dt><dd>${esc(pf[k])}</dd></div>`)
+  const pfSocialItems = Object.keys(pfSocial).filter(k => pf[k]).map(k => {
+    const v = String(pf[k])
+    const u = socialUrl(k, v)
+    return `<div><dt>${pfSocial[k]}</dt><dd>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}</dd></div>`
+  })
+  const profileBlock = (pfItems.length + pfSocialItems.length)
+    ? `<section class="profile"><h3 class="pf-title">模特资料</h3><dl class="pf-list">${pfItems.join('')}${pfSocialItems.join('')}</dl></section>`
     : ''
   const downloadBlock = `
   <section class="download">
