@@ -707,13 +707,13 @@ function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets
     <p class="sub">${siteBits}</p>
   </div>
   <div class="filters" id="filters">
-    <select id="sortSel" title="排序方式">
-      <option value="date-desc">最新发布</option>
-      <option value="date-asc">最早发布</option>
-      <option value="count-desc">图片最多</option>
-      <option value="size-desc">体积最大</option>
-      <option value="title-asc">标题排序</option>
-    </select>
+    <span class="sort-chips" id="sortChips" role="group" aria-label="排序方式">
+      <button type="button" class="on" data-sort="date-desc">最新发布</button>
+      <button type="button" data-sort="date-asc">最早发布</button>
+      <button type="button" data-sort="count-desc">图片最多</button>
+      <button type="button" data-sort="size-desc">体积最大</button>
+      <button type="button" data-sort="title-asc">标题排序</button>
+    </span>
     <span class="filter-chips" id="filterChips"></span>
   </div>
   <div class="grid" id="grid">${sets.map((s, i) => card(s, rel, { eager: i < 8 })).join('')}</div>
@@ -1193,6 +1193,13 @@ img{max-width:100%;display:block}
 /* 筛选栏 */
 .filters{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 16px}
 .filters select{padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;cursor:pointer}
+/* 排序标签：与"快捷筛选"同一行的 chip 组，中间用竖线隔开 */
+.sort-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.sort-chips button{font:inherit;font-size:12px;padding:5px 12px;border-radius:999px;border:1px solid var(--line);
+  background:var(--panel);color:var(--dim);cursor:pointer;transition:.15s}
+.sort-chips button:hover{color:var(--fg);border-color:var(--accent)}
+.sort-chips button.on{background:rgba(91,140,255,.18);border-color:var(--accent);color:var(--fg);font-weight:600}
+.sort-chips + .filter-chips:not(:empty){padding-left:12px;border-left:1px solid var(--line)}
 .filter-chips{display:flex;gap:6px;flex-wrap:wrap}
 .filter-chips button{font:inherit;font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--dim);cursor:pointer}
 .filter-chips button:hover{color:var(--fg);border-color:var(--accent)}
@@ -1689,8 +1696,10 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     let INDEX = null;
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     // 模特行：头像 + 模特名 + 日期（与静态卡片保持一致）
+    // 注意：头像地址由构建时写进 search-index.json 的 face 字段 —— 浏览器里没有 MODEL_FACE 这个变量，
+    // 这里直接引用它会 ReferenceError，整个客户端渲染（搜索、排序）都会挂掉
     const cardModelRowJS = (s, base) => {
-      const face = s.model && MODEL_FACE[s.model] ? MODEL_FACE[s.model] : '';
+      const face = s.face || '';
       const href = s.model ? base + 'model/' + encodeURIComponent(s.model) + '.html' : '';
       return (face ? '<a class="card-avatar" href="' + href + '"><img loading="lazy" src="' + base + face + '" alt="' + esc(s.model) + '"></a>' : '')
         + (s.model ? '<a class="card-model-name" href="' + href + '">' + esc(s.model) + '</a><span class="sep">·</span>' : '')
@@ -1782,10 +1791,12 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         });
       }
       // 排序 + 快捷筛选（系列/模特）+ 回到顶部
-      const sortSel = document.getElementById('sortSel');
+      const sortChips = document.getElementById('sortChips');
+      const SORT_LABEL = { 'date-desc': '最新发布', 'date-asc': '最早发布', 'count-desc': '图片最多', 'size-desc': '体积最大', 'title-asc': '标题排序' };
+      let SORT = 'date-desc';
       const chips = document.getElementById('filterChips');
       const applySort = (list) => {
-        const v = sortSel ? sortSel.value : 'date-desc';
+        const v = SORT;
         const arr = list.slice();
         if (v === 'date-desc') arr.sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))
           || String(b.addedAt || '').localeCompare(String(a.addedAt || ''))
@@ -1835,8 +1846,8 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         const noTitle = head && head.dataset.hideTitle === '1';
         if (head) {
           // 标题保持中性（下面有排序选择器，"最新图集"会自相矛盾）；排序条件写在副标题里
-          const sortLabel = sortSel && sortSel.options[sortSel.selectedIndex] ? sortSel.options[sortSel.selectedIndex].textContent.trim() : '';
-          const isDefaultSort = !sortSel || sortSel.value === 'date-desc';
+          const sortLabel = SORT_LABEL[SORT] || '最新发布';
+          const isDefaultSort = SORT === 'date-desc';
           const siteBits = (head.dataset.siteBits || '');
           head.innerHTML = (q || noTitle ? (q ? '<h1>搜索结果</h1>' : '') : '<h1>全部图集</h1>') + '<p class="sub">'
             + (q ? '匹配「' + esc(q) + '」共 ' + all.length + ' 套' + (isDefaultSort ? '' : ' · ' + esc(sortLabel))
@@ -1844,11 +1855,12 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
                  : siteBits + (isDefaultSort ? '' : ' · <span class="dim">按' + esc(sortLabel) + '</span>')) + '</p>';
         }
         // 静态分页只在没筛选时显示；筛选时用客户端分页（注意别抓错元素：客户端那条也在 .pagination-wrap 里）
+        const isFiltered = !!q || SORT !== 'date-desc';
         const staticPager = document.querySelector('.static-pager');
-        if (staticPager) staticPager.hidden = !!q;
+        if (staticPager) staticPager.hidden = isFiltered;
         if (clientPager) {
-          clientPager.hidden = !q || pages <= 1;
-          clientPager.innerHTML = (!q || pages <= 1) ? '' : clientPagerHtml(pages);
+          clientPager.hidden = !isFiltered || pages <= 1;
+          clientPager.innerHTML = (!isFiltered || pages <= 1) ? '' : clientPagerHtml(pages);
           clientPager.querySelectorAll('a[data-p]').forEach(a => a.addEventListener('click', (e) => {
             e.preventDefault();
             curPage = parseInt(a.dataset.p, 10) || 1;
@@ -1888,8 +1900,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         });
         const top = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 6);
         const mk = (label, val) => '<button data-q="' + esc(val) + '">' + esc(label) + '</button>';
-        chips.innerHTML = top(seriesCount).map(([k, n]) => mk(k + ' ' + n, k)).join('')
-          + top(modelCount).map(([k, n]) => mk('👤 ' + k + ' ' + n, k)).join('');
+        chips.innerHTML = top(seriesCount).map(([k, n]) => mk(k + ' ' + n, k)).join('');
         chips.querySelectorAll('button[data-q]').forEach(b => b.addEventListener('click', () => {
           const q = b.dataset.q;
           chips.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
@@ -1899,7 +1910,16 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
           history.replaceState(null, '', base + 'index.html?q=' + encodeURIComponent(q));
         }));
       }
-      if (sortSel) sortSel.addEventListener('change', () => {
+      if (sortChips) sortChips.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-sort]');
+        if (!btn) return;
+        SORT = btn.dataset.sort || 'date-desc';
+        sortChips.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === btn));
+        const q = (document.getElementById('q')?.value || '').trim().toLowerCase();
+        curPage = 1;
+        renderList(q);
+      });
+      if (false) (() => {
         const q = (document.getElementById('q')?.value || '').trim().toLowerCase();
         curPage = 1;
         renderList(q);
@@ -2556,6 +2576,7 @@ function build() {
       pinned: !!s.pinned && !s.hidden, pinOrder: s.pinOrder || 0,
       locked: !!s.hidden,
       dupTag: s.dupTag || '',
+      face: s.model ? (MODEL_FACE[s.model] || '') : '',   // 卡片模特行的头像（客户端渲染要用）
       cover: s.hidden
         ? (s.blurThumb || s.blurFile ? `blur/${s.slug}.webp` : '')
         : (s.coverThumb ? `set/${s.slug}/thumbs/${s.coverThumb}${verQ(s.thumbVer[s.coverThumb])}` : (s.coverFile ? `set/${s.slug}/${s.coverFile}` : '')),
