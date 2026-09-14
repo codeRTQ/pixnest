@@ -34,6 +34,7 @@ const DIST_REAL = join(ROOT, 'dist')          // 对外目录：预览服务器�
 const DIST_STAGE = join(ROOT, 'dist.new')     // 构建真正写入的暂存目录
 const DIST_OLD = join(ROOT, 'dist.old')       // 切换时旧产物临时挪到这里
 let DIST = DIST_STAGE                          // 构建期间所有 join(DIST, ...) 都落在暂存目录
+let SITE_BITS = ''                             // 列表页体量文案（首页算好后给页脚用）
 
 /**
  * 隐藏套图：全局密码存在项目根的 .hidden.json（已 gitignore，不进仓库也不随站点发布）。
@@ -518,7 +519,7 @@ ${ADULT_GATE}
 <main class="wrap">${body}</main>
 <footer class="site-footer">
   <div class="wrap">
-    <p>${esc(config.siteName)} · 静态生成 · 共 <span id="set-total"></span> 套图</p>
+    <p>${esc(config.siteName)} · 静态生成 · <span id="set-total">${SITE_BITS || ''}</span></p>
     <p class="foot-links">
       <a href="${rel}models.html">模特</a>
       <a href="${rel}collections.html">系列与标签</a>
@@ -694,19 +695,12 @@ function heroHtml(pinned, rel = '') {
 }
 
 function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets = null, pinned = []) {
-  // 站内总张数与总体量（整站口径，跟分页无关）
-  const siteList = allSets || sets
-  const siteBytes = siteList.reduce((n, s) => n + (s.bytes || 0), 0)
-  const siteCount = siteList.reduce((n, s) => n + (s.imageCount || 0), 0)
-  const siteBits = `共 ${total} 套${siteBytes ? ` · ${siteCount} 张 · 合计 <b class="size-strong">${esc(fmtSize(siteBytes))}</b>` : ''}${totalPages > 1 ? ` · 第 ${page} / ${totalPages} 页（本页 ${sets.length} 套）` : ''}`
   const hasHero = page === 1 && pinned.length > 0
   const body = `
   ${hasHero ? heroHtml(pinned, rel) : ''}
-  <div class="page-head" data-site-bits="${esc(siteBits)}"${hasHero ? ' data-hide-title="1"' : ''}>
-    ${hasHero ? '' : '<h1>全部图集</h1>'}
-    <p class="sub">${siteBits}</p>
-  </div>
+  <div class="page-head"${hasHero ? ' hidden' : ''}>${hasHero ? '' : '<h1>全部图集</h1>'}</div>
   <div class="filters" id="filters">
+    <span class="filter-label">排序</span>
     <span class="sort-chips" id="sortChips" role="group" aria-label="排序方式">
       <button type="button" class="on" data-sort="date-desc">最新发布</button>
       <button type="button" data-sort="date-asc">最早发布</button>
@@ -821,7 +815,7 @@ function modelsIndexPage(byModel, allSets) {
     const chips = [pf.birth, pf.height, pf.style, pf.city].filter(Boolean).slice(0, 3)
       .map(v => `<span class="tag">${esc(v)}</span>`).join('')
     return `<article class="card">
-    <a class="card-link" href="model/${encodeURIComponent(name)}.html">
+    <a class="card-link cover-link" href="model/${encodeURIComponent(name)}.html" aria-label="${esc(name)}">
       <div class="card-cover"${face.coverLqip ? ` style="background-image:url(${face.coverLqip})"` : ''}>
         ${setCoverUrl(face)
           ? `<img loading="lazy"${face.hidden ? ' class="blurred"' : ''} src="${setCoverUrl(face)}" alt="${esc(name)}">`
@@ -829,11 +823,14 @@ function modelsIndexPage(byModel, allSets) {
         <span class="badge">${list.length} 套</span>
         ${b ? `<span class="badge badge-size">${esc(fmtSize(b))}</span>` : ''}
       </div>
-      <h2 class="card-title">${avatarHtml(name, '', 'xs') || '👤 '}${esc(name)}</h2>
     </a>
+    <a class="card-link title-link" href="model/${encodeURIComponent(name)}.html"><h2 class="card-title">${esc(name)}</h2></a>
+    <div class="card-model">
+      ${MODEL_FACE[name] ? `<a class="card-avatar" href="model/${encodeURIComponent(name)}.html" aria-label="${esc(name)}"><img loading="lazy" src="${MODEL_FACE[name]}" alt="${esc(name)}"></a>` : ''}
+      <time datetime="${esc(latest ? latest.date : '')}">最新 ${esc(slashDate(latest ? latest.date : ''))}</time>
+    </div>
     <div class="card-meta">
       <span class="card-chips">${chips}</span>
-      <time datetime="${esc(latest ? latest.date : '')}">最新 ${esc(latest ? latest.date : '')}</time>
     </div>
   </article>`
   }).join('')
@@ -1690,7 +1687,6 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
   const grid = document.getElementById('grid');
   const input = document.getElementById('q');
   const empty = document.getElementById('empty');
-  const total = document.getElementById('set-total');
   if (grid) {
     const base = location.pathname.includes('/page/') ? '../../' : '';
     let INDEX = null;
@@ -1770,7 +1766,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     fetch(base + 'search-index.json').then(r => r.ok ? r.json() : null).then(d => {
       if (!d) return;
       INDEX = d;
-      if (total) total.textContent = d.count;
+      // 页脚的体量文案是构建时写好的（共 N 套 · N 张 · 合计 X），这里不要覆盖它
       // 带 ?q= 进来时：先把词填进搜索框，真正的渲染放到函数都定义好之后再做
       // （原来这里直接调 renderList，而它定义在下面 —— TDZ 报错会让整段 JS 挂掉，
       //   搜索框/排序/筛选芯片/回到顶部全部失效，且被末尾的 .catch 静默吞掉）
@@ -1843,16 +1839,23 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         const head = document.querySelector('.page-head');
         const hero = document.getElementById('hero');
         if (hero) hero.hidden = !!q;                       // 搜索/筛选时先收起推荐轮播
-        const noTitle = head && head.dataset.hideTitle === '1';
         if (head) {
-          // 标题保持中性（下面有排序选择器，"最新图集"会自相矛盾）；排序条件写在副标题里
+          // 只有"搜索中"才显示标题区（带匹配条数 + 清除筛选）；平时列表上方不摆那行体量说明
+          // （体量信息在页脚）—— 标题区为空时整块隐藏，避免留出空白间距
           const sortLabel = SORT_LABEL[SORT] || '最新发布';
           const isDefaultSort = SORT === 'date-desc';
-          const siteBits = (head.dataset.siteBits || '');
-          head.innerHTML = (q || noTitle ? (q ? '<h1>搜索结果</h1>' : '') : '<h1>全部图集</h1>') + '<p class="sub">'
-            + (q ? '匹配「' + esc(q) + '」共 ' + all.length + ' 套' + (isDefaultSort ? '' : ' · ' + esc(sortLabel))
-                 + ' · <a href="' + base + 'index.html" class="dim">清除筛选</a>'
-                 : siteBits + (isDefaultSort ? '' : ' · <span class="dim">按' + esc(sortLabel) + '</span>')) + '</p>';
+          if (q) {
+            head.hidden = false;
+            head.innerHTML = '<h1>搜索结果</h1><p class="sub">匹配「' + esc(q) + '」共 ' + all.length + ' 套'
+              + (isDefaultSort ? '' : ' · 按' + esc(sortLabel))
+              + ' · <a href="' + base + 'index.html" class="dim">清除筛选</a></p>';
+          } else if (hero) {
+            head.hidden = true;                             // 有轮播的首页：标题区整块不显示
+            head.innerHTML = '';
+          } else {
+            head.hidden = false;                            // 无轮播的页面保留「全部图集」标题
+            head.innerHTML = '<h1>全部图集</h1>';
+          }
         }
         // 静态分页只在没筛选时显示；筛选时用客户端分页（注意别抓错元素：客户端那条也在 .pagination-wrap 里）
         const isFiltered = !!q || SORT !== 'date-desc';
@@ -2334,6 +2337,12 @@ function build() {
   const sets = slugs.map(readSet).filter(Boolean)
     .sort((a, b) => cmpDateDesc(a, b))
   hiddenCountGlobal = sets.filter(s => s.hiddenOk).length
+  // 页脚用的整站体量文案（跟分页无关，一次算好给 layout 用）
+  {
+    const bytes = sets.reduce((n, s) => n + (s.bytes || 0), 0)
+    const imgs = sets.reduce((n, s) => n + (s.imageCount || 0), 0)
+    SITE_BITS = `共 ${sets.length} 套 · ${imgs} 张${bytes ? ` · 合计 ${fmtSize(bytes)}` : ''}`
+  }
   // 同名作品（不同模特 / 不同系列拍同一主题）很常见：给它们标一个**真能区分开**的标签 ——
   // 模特都不重样就用模特，模特重样但系列不重样就用系列，两者都重样才用「模特·系列」
   const titleGroups = {}
