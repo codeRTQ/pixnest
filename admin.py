@@ -1492,6 +1492,25 @@ function clearBanner(slug){
     .catch(function(e){toast('失败：'+e,false)});
 }
 // ── 隐藏套图：快速开关 + 全局密码 ──
+function togglePwView(){
+  const i=document.getElementById('hidPw'),b=document.getElementById('pwEye');
+  if(!i)return;
+  const masked=i.type==='password';
+  i.type=masked?'text':'password';
+  if(b)b.textContent=masked?'👁 遮住':'👁 显示';
+}
+function copyText(t,label){
+  if(!t){toast('没有可复制的内容',false);return}
+  const done=function(){toast('已复制'+label+'：'+t,true)};
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done).catch(function(){fallbackCopy(t,done)})}
+  else fallbackCopy(t,done);
+}
+function fallbackCopy(t,done){
+  const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');done()}catch(e){toast('复制失败，请手动选中复制',false)}
+  ta.remove();
+}
 function toggleHidden(slug,on){
   if(on&&!confirm('隐藏这套图？列表里只会显示模糊封面，点不进去；要输密码才能查看。'))return;
   toast('处理中…');
@@ -2648,6 +2667,25 @@ def home_page(msg='', q='', page_no=1, per=24, sort='date-desc', view='card'):
     <span class="sub" id="upProgress" style="margin:0"></span></div>
   <div class="progress" id="progWrap" hidden><div class="bar" id="progBar"></div></div>
 </form>
+<details class="panel"{' open' if not hidden_pw() else ''}>
+  <summary style="cursor:pointer;font-weight:600;font-size:15px">🔒 隐藏套图（模糊封面 + 密码查看）
+    <span class="sub" style="font-weight:400"> · {hidden_n} 套已隐藏 · {('密码已设置（点开查看 / 修改）' if hidden_pw() else '⚠️ 还没设置密码')}</span></summary>
+  <div class="row" style="align-items:center;margin-top:12px">
+    <label style="margin:0">全局密码</label>
+    <input type="text" id="hidPw" value="{esc_attr(hidden_pw())}" placeholder="留空＝关闭隐藏功能" style="max-width:240px">
+    <button class="btn ghost sm" type="button" onclick="togglePwView()" id="pwEye" title="临时遮住密码（截图/有人看着时用）">👁 遮住</button>
+    <button class="btn ghost sm" type="button" onclick="copyText(document.getElementById('hidPw').value,'密码')">📋 复制密码</button>
+    <label style="margin:0 0 0 10px">解锁提示语</label>
+    <input type="text" id="hidHint" value="{esc_attr(hidden_hint())}" placeholder="私密套图，请输入密码查看" style="max-width:300px">
+    <button class="btn" onclick="saveHiddenCfg()">保存并重建</button>
+  </div>
+  <p class="sub" style="margin:8px 0 4px"><b>改密码会让所有隐藏套图的地址一起变</b>（已发出去的旧链接失效，需要重新复制）；留空保存＝关闭隐藏功能，已隐藏的套图会重新变成公开。</p>
+  <p class="sub" style="margin:6px 0 0">勾了「隐藏」的套图：列表里只显示<b>模糊封面</b>、点不进去，输密码后才能打开。密码只存在本机
+    <code>.hidden.json</code>（已 gitignore，不进仓库、不随站点发布）；隐藏套图的页面与图片放在
+    <code>/h/&lt;密码算出来的随机串&gt;/</code> 下 —— 不知道密码就算不出地址，站点源码里也不出现它。</p>
+  {f'<p class="sub" style="margin:8px 0 0">已隐藏 {hidden_n} 套：{"、".join(hidden_names[:6])}{"…" if hidden_n > 6 else ""}　' + '<a href="/?q=">在列表里筛选</a></p>' if hidden_names else '<p class="sub" style="margin:8px 0 0">还没有隐藏任何套图：在卡片上点「🔒 隐藏」，或在编辑页勾选。</p>'}
+  <p class="sub" style="margin:6px 0 0">单套想用别的密码：打开那套图的编辑页，勾「隐藏」后填「单套密码」即可（留空＝用这里的全局密码）。</p>
+</details>
 <div class="panel"><h2>② 已有图集（{total_all} 套{(' · 筛选出 ' + str(total_hit) + ' 套') if q else ''}）<span class="sub" style="font-weight:400"> · 点击卡片即可编辑</span>
   {f'<span class="sub" style="font-weight:400"> · 🤖 {untagged} 套还没打标</span>' if untagged else ''}
   {f'<span class="sub" style="font-weight:400"> · 🤖 打标队列进行中（{_at.get("done", 0)}/{_at.get("total", 0)}）</span>' if _at.get('running') else ''}
@@ -2700,27 +2738,12 @@ def home_page(msg='', q='', page_no=1, per=24, sort='date-desc', view='card'):
     <div class="pub-head"><b id="pubTitle">发布到线上</b><span id="pubMsg" class="sub" style="margin:0"></span></div>
     <pre id="pubLog"></pre>
   </div>
-  <div class="pub" id="atBox" hidden>
-    <div class="pub-head"><b>批量自动打标</b><span id="atMsg" class="sub" style="margin:0"></span></div>
-    <div class="progress" id="atWrap"><div class="bar" id="atBar"></div></div>
-    <pre id="atLog"></pre>
-  </div>
-  <details class="panel" style="margin-top:14px"{' open' if not hidden_pw() else ''}>
-    <summary style="cursor:pointer;font-weight:600;font-size:15px">🔒 隐藏套图（模糊封面 + 密码查看）<span class="sub" style="font-weight:400"> · {hidden_n} 套已隐藏 · {('密码已设置' if hidden_pw() else '⚠️ 还没设置密码')}</span></summary>
-    <p class="sub" style="margin:10px 0 8px">勾了「隐藏」的套图：列表里只显示<b>模糊封面</b>、点不进去，输入密码后才能打开。<br>
-      密码只存在本地 <code>.hidden.json</code>（已 gitignore，不会进仓库、不会随站点发布）；隐藏套图的页面与图片会被放到
-      <code>/h/&lt;密码算出来的随机串&gt;/</code> 下 —— 不知道密码就算不出地址，站点源码里也不出现它，所以爬虫和路人都拿不到。<br>
-      换密码会让所有隐藏套图的地址一起变（已发出去的旧链接失效）；取消隐藏则恢复成公开图集。</p>
-    <div class="row" style="align-items:center">
-      <label style="margin:0">全局密码</label>
-      <input type="text" id="hidPw" value="{esc_attr(hidden_pw())}" placeholder="留空＝关闭隐藏功能" style="max-width:280px">
-      <label style="margin:0">解锁提示语</label>
-      <input type="text" id="hidHint" value="{esc_attr(hidden_hint())}" placeholder="私密套图，请输入密码查看" style="max-width:320px">
-      <button class="btn" onclick="saveHiddenCfg()">保存并重建</button>
-      <span class="sub" style="margin:0">改密码后所有隐藏套图地址都会变，需要重新分享链接</span>
+    <div class="pub" id="atBox" hidden>
+      <div class="pub-head"><b>批量自动打标</b><span id="atMsg" class="sub" style="margin:0"></span></div>
+      <div class="progress" id="atWrap"><div class="bar" id="atBar"></div></div>
+      <pre id="atLog"></pre>
     </div>
-    {f'<p class="sub">已隐藏：{"、".join(hidden_names)}</p>' if hidden_names else '<p class="sub">还没有隐藏任何套图：在卡片上点「🔒 隐藏」，或在编辑页勾选。</p>'}
-  </details></div>"""
+  </div>"""
     extra = """
 const drop=document.getElementById('drop'),imgs=document.getElementById('imgs'),files=document.getElementById('files');
 const mk=document.getElementById('mkcover'),cf=document.getElementById('coverfile'),pc=document.getElementById('pickcover'),cn=document.getElementById('covername');
@@ -2868,6 +2891,16 @@ def edit_page(slug, msg=''):
     _res_hint = (f'已检测：{_res_txt}（共 {_res_info["count"]} 张，{_res_info["distinct"]} 种尺寸）'
                  if _res_txt else '暂无图片可检测')
     pf = m.get('profile') or {}
+    # 隐藏套图的分享地址（f-string 里不能出现反斜杠，所以这段先在外面拼好）
+    _hid_pw = m.get('hidePassword') or hidden_pw()
+    _hid_tok = hidden_token(slug, _hid_pw) if (m.get('hidden') and _hid_pw) else ''
+    hid_url_html = (
+        '<p class="sub" style="margin:-2px 0 8px">本套访问地址（不知道密码算不出来，可直接发给朋友）：'
+        '<code id="hidUrl">https://pixnest.dpdns.org/h/' + _hid_tok + '/</code> '
+        '<button type="button" class="btn ghost sm" onclick="copyText(this.previousElementSibling.textContent.trim(),&#39;分享链接&#39;)">📋 复制链接</button>'
+        '<button type="button" class="btn ghost sm" onclick="copyText(document.getElementById(&#39;hidPwHint&#39;)?document.getElementById(&#39;hidPwHint&#39;).textContent.trim():&#39;&#39;,&#39;密码&#39;)">📋 复制密码</button>'
+        '<span class="sub">（密码：<b id="hidPwHint">' + esc_attr(_hid_pw) + '</b>' + ('· 单套密码' if m.get('hidePassword') else '· 全局密码') + '）</span></p>'
+    ) if _hid_tok else ''
 
     body = f"""
 <div class="crumb"><a href="/">← 图集列表</a></div>
@@ -2919,7 +2952,7 @@ def edit_page(slug, msg=''):
       </label></div>
       <div><label>单套密码（留空＝用全局密码；填了这套就用它）</label><input type="text" name="hidePassword" value="{m.get('hidePassword','')}" placeholder="{('当前全局密码已设置' if hidden_pw() else '⚠️ 还没设置全局密码，先去首页「🔒 隐藏套图」里设一个')}"></div>
     </div>
-    {f'<p class="sub" style="margin:-2px 0 8px">本套访问地址（不知道密码算不出来，可以直接发给朋友）：<code>/h/{hidden_token(slug, m.get("hidePassword") or hidden_pw())}/</code></p>' if m.get('hidden') and (m.get('hidePassword') or hidden_pw()) else ''}
+    {hid_url_html}
     <div><label style="margin-top:12px">模特资料（选填 · 填了才在详情页展示 · AI 不会自动生成这些）</label></div>
     <div class="grid2">
       <div><label>出生</label><input type="text" name="p_birth" value="{pf.get('birth','')}" placeholder="如 1998"></div>
