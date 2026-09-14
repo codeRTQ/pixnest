@@ -515,12 +515,13 @@ ${ADULT_GATE}
 </body>
 </html>`
 
-const card = (s, rel = '') => (s.hidden && !s.hiddenOk)
+const card = (s, rel = '', noModel = false) => (s.hidden && !s.hiddenOk)
   // 隐藏但没配密码（构建时算不出私有地址）→ 只给一张糊图，没有任何入口
   ? `<article class="card card-locked" data-hid="${esc(s.slug)}">
   <div class="card-cover locked">
     ${s.blurThumb ? `<img class="blurred" src="${rel}blur/${esc(s.slug)}.webp" alt="">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
+    ${s.model && !noModel ? `<span class="badge badge-model" title="模特：${esc(s.model)}">👤 ${esc(s.model)}</span>` : ''}
   </div>
   <h2 class="card-title">${esc(s.title)}</h2>
   <div class="card-meta"><span class="lock-hint">还没设置隐藏密码</span></div>
@@ -530,11 +531,12 @@ const card = (s, rel = '') => (s.hidden && !s.hiddenOk)
   <div class="card-cover locked">
     ${s.blurThumb ? `<img class="blurred" src="${rel}blur/${esc(s.slug)}.webp" alt="${esc(s.title)}">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
+    ${s.model && !noModel ? `<span class="badge badge-model" title="模特：${esc(s.model)}">👤 ${esc(s.model)}</span>` : ''}
   </div>
   <h2 class="card-title">${esc(s.title)}</h2>
   <div class="card-meta">
     <button class="unlock-btn" data-hid="${esc(s.slug)}" title="${esc(HIDDEN_HINT)}">🔓 输入密码查看</button>
-    ${s.dupTag ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
+    ${s.dupTag && s.dupTag !== s.model ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
     <time datetime="${esc(s.date)}">${esc(s.date)}</time>
   </div>
 </article>`
@@ -548,11 +550,12 @@ const card = (s, rel = '') => (s.hidden && !s.hiddenOk)
       <span class="badge">${s.imageCount}P</span>
       ${s.sizeText ? `<span class="badge badge-size" title="原图总大小 ${esc(s.sizeText)}">${esc(s.sizeText)}</span>` : (s.packSize ? `<span class="badge badge-size">${esc(s.packSize)}</span>` : '')}
       ${s.pinned ? '<span class="badge badge-pin" title="置顶推荐">📌 置顶</span>' : ''}
+      ${s.model && !noModel ? `<span class="badge badge-model" title="模特：${esc(s.model)}">👤 ${esc(s.model)}</span>` : ''}
     </div>
     <h2 class="card-title">${esc(s.title)}</h2>
   </a>
   <div class="card-meta">
-    ${s.dupTag ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
+    ${s.dupTag && s.dupTag !== s.model ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
     ${s.series ? `<a class="tag tag-series" href="${rel}series/${encodeURIComponent(s.series)}.html" title="查看该系列全部图集">${esc(s.series)}</a>` : ''}
     ${s.tags.slice(0, 2).map(t => `<a class="tag tag-link" href="${rel}tag/${encodeURIComponent(t)}.html" title="查看同标签图集">${esc(t)}</a>`).join('')}
     <time datetime="${esc(s.date)}">${esc(s.date)}</time>
@@ -738,7 +741,7 @@ function modelPage(name, list, rel = '../') {
   ${profileQuoteHtml(pf)}
   ${seriesList.length ? `<div class="chips-cloud" style="margin:0 0 18px">${seriesList.map(n =>
     `<a class="cloud-chip" href="${rel}series/${encodeURIComponent(n)}.html">${esc(n)}<span>${list.filter(s => s.series === n).length}</span></a>`).join('')}</div>` : ''}
-  <div class="grid">${list.map(s => card(s, rel)).join('')}</div>
+  <div class="grid">${list.map(s => card(s, rel, true)).join('')}</div>
   <p class="more-hint"><a href="${rel}models.html" class="dim">← 全部模特</a></p>`
   const url = pageUrl(`model/${encodeURIComponent(name)}.html`)
   return layout({
@@ -1191,6 +1194,10 @@ img{max-width:100%;display:block}
   .hero-dots{left:14px;bottom:14px}
 }
 .badge-pin{left:8px;top:auto;bottom:8px;background:rgba(255,180,84,.92);color:#1a1206;font-weight:600}
+/* 封面上标出模特：同名作品（不同模特拍同一主题）一眼能分开 */
+.badge-model{left:auto;top:auto;right:8px;bottom:8px;background:rgba(10,12,18,.76);color:#fff;
+  border:1px solid rgba(255,255,255,.28);font-weight:600;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card:hover .badge-model{border-color:var(--accent);color:var(--accent)}
 .pagination-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;margin:30px 0 10px}
 .pagination-wrap[hidden]{display:none}   /* CSS 的 display 会盖掉 hidden 属性，必须显式声明 */
 .pagination{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0;padding:0;justify-content:center}
@@ -1597,10 +1604,11 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       '<div class="card-cover locked">',
       (s.cover ? '<img class="blurred" loading="lazy" src="' + base + s.cover + '" alt="' + esc(s.title) + '">' : '<div class="no-cover">🔒</div>'),
       '<span class="badge badge-lock">🔒 隐藏</span>',
+      (s.model ? '<span class="badge badge-model" title="模特：' + esc(s.model) + '">👤 ' + esc(s.model) + '</span>' : ''),
       '</div>',
       '<h2 class="card-title">' + esc(s.title) + '</h2>',
       '<div class="card-meta">',
-      (s.dupTag ? '<span class="tag tag-model" title="同名作品，用它区分">' + esc(s.dupTag) + '</span>' : ''),
+      (s.dupTag && s.dupTag !== s.model ? '<span class="tag tag-model">' + esc(s.dupTag) + '</span>' : ''),
       '<button class="unlock-btn" data-hid="' + esc(s.slug) + '">🔓 输入密码查看</button>',
       '<time>' + esc(s.date) + '</time>',
       '</div></article>',
@@ -1612,11 +1620,12 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       '<span class="badge">' + s.imageCount + 'P</span>',
       (s.size || s.packSize ? '<span class="badge badge-size">' + esc(s.size || s.packSize) + '</span>' : ''),
       (s.pinned ? '<span class="badge badge-pin" title="置顶推荐">📌 置顶</span>' : ''),
+      (s.model ? '<span class="badge badge-model" title="模特：' + esc(s.model) + '">👤 ' + esc(s.model) + '</span>' : ''),
       '</div>',
       '<h2 class="card-title">' + esc(s.title) + '</h2>',
       '</a>',
       '<div class="card-meta">',
-      (s.dupTag ? '<span class="tag tag-model" title="同名作品，用它区分">' + esc(s.dupTag) + '</span>' : ''),
+      (s.dupTag && s.dupTag !== s.model ? '<span class="tag tag-model">' + esc(s.dupTag) + '</span>' : ''),
       (s.series ? '<a class="tag tag-series" href="' + base + 'series/' + encodeURIComponent(s.series) + '.html">' + esc(s.series) + '</a>' : ''),
       (s.tags || []).slice(0, 2).map(t => '<a class="tag tag-link" href="' + base + 'tag/' + encodeURIComponent(t) + '.html">' + esc(t) + '</a>').join(''),
       '<time>' + esc(s.date) + '</time>',
