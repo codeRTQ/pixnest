@@ -302,6 +302,11 @@ function readSet(slug) {
   }
   const thumbs = Object.values(thumbFor)
   const coverThumb = ['cover.webp', 'cover.jpg', 'cover.jpeg', 'cover.png'].find(f => existsSync(join(dir, 'thumbs', f)))
+  // 封面模糊占位图（内联到卡片背景）：图片还没加载完时也不会是一片空白
+  const coverLqipPath = join(dir, 'thumbs', 'cover.lqip.jpg')
+  const coverLqip = existsSync(coverLqipPath)
+    ? 'data:image/jpeg;base64,' + readFileSync(coverLqipPath).toString('base64')
+    : ''
   // 隐藏套图：公共的模糊小图（后台生成），以及密码算出来的私有地址 token
   const blurThumb = ['blur.webp', 'blur.jpg'].find(f => existsSync(join(dir, 'thumbs', f)))
   const blurFile = ['blur.jpg', 'blur.webp', 'blur.png'].find(f => existsSync(join(dir, f)))
@@ -375,6 +380,7 @@ function readSet(slug) {
     packPath: hasPack ? packPath : null,
     coverFile,
     coverThumb,
+    coverLqip,
     bannerFile,
     bannerThumb,
     blurThumb,
@@ -450,7 +456,7 @@ function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
     <h1>${esc(name)}</h1>
     <p class="sub">${label}「${esc(name)}」共 ${sets.length} 套图集${catSize ? ` · ${catCount} 张 · 合计 <b class="size-strong">${esc(catSize)}</b>` : ''}</p>
   </div>
-  <div class="grid">${sets.map(s => card(s, rel)).join('')}</div>
+  <div class="grid">${sets.map((s, i) => card(s, rel, { eager: i < 8 })).join('')}</div>
   <p class="more-hint"><a href="${rel}index.html" class="dim">← 返回全部图集</a></p>
   ${cloudHtml}`
   const url = pageUrl(`${kind === 'series' ? 'series' : 'tag'}/${encodeURIComponent(name)}.html`)
@@ -529,27 +535,27 @@ ${ADULT_GATE}
 </body>
 </html>`
 
-const card = (s, rel = '', noModel = false) => (s.hidden && !s.hiddenOk)
+const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   // 隐藏但没配密码（构建时算不出私有地址）→ 只给一张糊图，没有任何入口
   ? `<article class="card card-locked" data-hid="${esc(s.slug)}">
-  <div class="card-cover locked">
+  <div class="card-cover locked"${s.coverLqip ? ` style="background-image:url(${s.coverLqip})"` : ''}>
     ${s.blurThumb ? `<img class="blurred" src="${rel}blur/${esc(s.slug)}.webp" alt="">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
   </div>
   <div class="card-head">
-    ${s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
+    ${!opts.noModel && s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
     <h2 class="card-title">${esc(s.title)}</h2>
   </div>
   <div class="card-meta"><span class="lock-hint">还没设置隐藏密码</span></div>
 </article>`
   : s.hiddenOk
   ? `<article class="card card-locked" data-hid="${esc(s.slug)}"${s.blurThumb ? ` data-cover="${esc(s.coverThumb || '')}"` : ''}>
-  <div class="card-cover locked">
-    ${s.blurThumb ? `<img class="blurred" src="${rel}blur/${esc(s.slug)}.webp" alt="${esc(s.title)}">` : '<div class="no-cover">🔒</div>'}
+  <div class="card-cover locked"${s.coverLqip ? ` style="background-image:url(${s.coverLqip})"` : ''}>
+    ${s.blurThumb ? `<img class="blurred"${opts.eager ? '' : ' loading="lazy"'} src="${rel}blur/${esc(s.slug)}.webp" alt="${esc(s.title)}">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
   </div>
   <div class="card-head">
-    ${s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
+    ${!opts.noModel && s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
     <h2 class="card-title">${esc(s.title)}</h2>
   </div>
   <div class="card-meta">
@@ -561,9 +567,9 @@ const card = (s, rel = '', noModel = false) => (s.hidden && !s.hiddenOk)
   : `
 <article class="card" data-title="${esc((s.displayTitle + ' ' + s.model + ' ' + s.tags.join(' ')).toLowerCase())}">
   <a class="card-link cover-link" href="${rel}set/${s.slug}/index.html" aria-label="${esc(s.title)}">
-    <div class="card-cover">
+    <div class="card-cover"${s.coverLqip ? ` style="background-image:url(${s.coverLqip})"` : ''}>
       ${s.coverFile
-        ? `<img loading="lazy" src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="${esc(s.title)}">`
+        ? `<img${opts.eager ? ' fetchpriority="high"' : ' loading="lazy"'} src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="${esc(s.title)}">`
         : `<div class="no-cover">无封面</div>`}
       <span class="badge">${s.imageCount}P</span>
       ${s.sizeText ? `<span class="badge badge-size" title="原图总大小 ${esc(s.sizeText)}">${esc(s.sizeText)}</span>` : (s.packSize ? `<span class="badge badge-size">${esc(s.packSize)}</span>` : '')}
@@ -571,7 +577,7 @@ const card = (s, rel = '', noModel = false) => (s.hidden && !s.hiddenOk)
     </div>
   </a>
   <div class="card-head">
-    ${s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
+    ${!opts.noModel && s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
     <a class="card-link title-link" href="${rel}set/${s.slug}/index.html"><h2 class="card-title">${esc(s.title)}</h2></a>
   </div>
   <div class="card-meta">
@@ -684,7 +690,7 @@ function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets
     </select>
     <span class="filter-chips" id="filterChips"></span>
   </div>
-  <div class="grid" id="grid">${sets.map(s => card(s, rel)).join('')}</div>
+  <div class="grid" id="grid">${sets.map((s, i) => card(s, rel, { eager: i < 8 })).join('')}</div>
   <p class="empty" id="empty" hidden>没有匹配的图集</p>
   <div id="clientPager"></div>
   ${pagerHtml(page, totalPages, p => rel + (p === 1 ? 'index.html' : `page/${p}.html`))}
@@ -761,7 +767,7 @@ function modelPage(name, list, rel = '../') {
   ${profileQuoteHtml(pf)}
   ${seriesList.length ? `<div class="chips-cloud" style="margin:0 0 18px">${seriesList.map(n =>
     `<a class="cloud-chip" href="${rel}series/${encodeURIComponent(n)}.html">${esc(n)}<span>${list.filter(s => s.series === n).length}</span></a>`).join('')}</div>` : ''}
-  <div class="grid">${list.map(s => card(s, rel, true)).join('')}</div>
+  <div class="grid">${list.map((s, i) => card(s, rel, { noModel: true, eager: i < 8 })).join('')}</div>
   <p class="more-hint"><a href="${rel}models.html" class="dim">← 全部模特</a></p>`
   const url = pageUrl(`model/${encodeURIComponent(name)}.html`)
   return layout({
@@ -790,7 +796,7 @@ function modelsIndexPage(byModel, allSets) {
       .map(v => `<span class="tag">${esc(v)}</span>`).join('')
     return `<article class="card">
     <a class="card-link" href="model/${encodeURIComponent(name)}.html">
-      <div class="card-cover">
+      <div class="card-cover"${face.coverLqip ? ` style="background-image:url(${face.coverLqip})"` : ''}>
         ${setCoverUrl(face)
           ? `<img loading="lazy"${face.hidden ? ' class="blurred"' : ''} src="${setCoverUrl(face)}" alt="${esc(name)}">`
           : '<div class="no-cover">无封面</div>'}
@@ -830,7 +836,7 @@ function seriesIndexPage(bySeries, allSets) {
     const models = [...new Set(list.map(s => s.model).filter(Boolean))]
     return `<article class="card">
     <a class="card-link" href="series/${encodeURIComponent(name)}.html">
-      <div class="card-cover">
+      <div class="card-cover"${face.coverLqip ? ` style="background-image:url(${face.coverLqip})"` : ''}>
         ${setCoverUrl(face)
           ? `<img loading="lazy"${face.hidden ? ' class="blurred"' : ''} src="${setCoverUrl(face)}" alt="${esc(name)}">`
           : '<div class="no-cover">无封面</div>'}
@@ -1022,7 +1028,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
         : `<a class="pn" href="${setHref(next)}"><small>下一套</small><span>${esc(next.title)}</span></a>`) : '<span class="pn dim">已是最后一套</span>'}
     </nav>
     ${related && related.length ? `<h2 class="sec-title">相关推荐</h2>
-    <div class="grid related">${related.map(x => card(x, rel)).join('')}</div>` : ''}
+    <div class="grid related">${related.map(x => card(x, rel, { eager: true })).join('')}</div>` : ''}
   </article>
   ${sideBlock}
   </div>
@@ -1098,7 +1104,7 @@ img{max-width:100%;display:block}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;transition:transform .15s,border-color .15s}
 .card:hover{transform:translateY(-3px);border-color:var(--accent)}
-.card-cover{position:relative;aspect-ratio:3/4;background:var(--panel2);overflow:hidden}
+.card-cover{position:relative;aspect-ratio:3/4;background:var(--panel2) center/cover no-repeat;overflow:hidden}
 .card-cover img{width:100%;height:100%;object-fit:cover}
 .no-cover{display:flex;align-items:center;justify-content:center;height:100%;color:var(--dim)}
 .badge{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.65);color:#fff;font-size:12px;padding:2px 8px;border-radius:999px}
