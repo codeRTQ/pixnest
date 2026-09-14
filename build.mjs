@@ -1040,7 +1040,10 @@ img{max-width:100%;display:block}
 .hero-slide.on{opacity:1;pointer-events:auto}
 .hero-slide img{width:100%;height:100%;object-fit:cover;object-position:center 22%;display:block}
 .hero-slide img.is-banner{object-position:center center}   /* 自己裁的 Banner 用居中，别再偏向面部 */
-.hero-slide::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05) 0%,rgba(0,0,0,.2) 45%,rgba(0,0,0,.78) 100%)}
+/* 图片上的压暗渐变：只压下半部分（标题在底部），上半部分留给画面 ——
+   自己裁的 Banner 才不会被大片黑色吞掉 */
+.hero-slide::after{content:'';position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(0,0,0,0) 0%,rgba(0,0,0,0) 46%,rgba(0,0,0,.24) 66%,rgba(0,0,0,.62) 86%,rgba(0,0,0,.82) 100%)}
 .hero-slide:hover img{filter:brightness(1.06)}
 /* 文字块：宽松排版（去掉 CTA 后只留 角标 / 标题 / 信息 三行） */
 .hero-info{position:absolute;left:22px;right:22px;bottom:20px;z-index:2;display:flex;flex-direction:column;gap:9px;align-items:flex-start}

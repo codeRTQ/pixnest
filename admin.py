@@ -1053,6 +1053,11 @@ table.lk tr.bad td{color:#ff8a8a}
   border:2px solid transparent;background:#111;flex:0 0 auto;transition:.15s}
 .crop-strip img:hover{opacity:.9}
 .crop-strip img.on{opacity:1;border-color:var(--accent)}
+/* 首页大图：标出"会被标题文字压暗"的下半部分，避免重要内容裁进去却看不见 */
+.crop-safe{position:absolute;left:0;right:0;bottom:0;height:38%;pointer-events:none;border-radius:0 0 8px 8px;
+  background:linear-gradient(180deg,rgba(0,0,0,0),rgba(0,0,0,.45) 55%,rgba(0,0,0,.8));
+  display:flex;align-items:flex-end;padding:8px 10px;box-sizing:border-box}
+.crop-safe span{font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:2px 8px;border-radius:999px;opacity:.9}
 /* 标签管理 */
 .tagtable{width:100%;border-collapse:collapse;font-size:13px}
 .tagtable th{text-align:left;color:var(--dim);font-weight:400;padding:6px 8px;border-bottom:1px solid var(--line)}
@@ -1211,7 +1216,7 @@ function resetOrder(){location.reload()}
 let CROP={mode:'cover',slug:'',model:'',img:'',ratio:3/4,ow:0,oh:0,x:0,y:0,w:0,h:0,dispW:0,dispH:0,list:[]};
 const CROP_META={
   cover:{title:'✂ 裁剪封面',tip:'拖动选区移动 · 拖右下角调整大小 · 目标比例 3:4 · 输出 800×1067',save:'保存封面',url:'/cropcover'},
-  banner:{title:'🖼 裁剪首页大图（置顶轮播）',tip:'建议挑横构图 · 输出 1600×450（32:9）',save:'保存大图',url:'/cropbanner'},
+  banner:{title:'🖼 裁剪首页大图（置顶轮播）',tip:'建议挑横构图 · 输出 1600×450（32:9）· 只有置顶图集会显示在首页轮播 · 下半部分暗色区会被标题压住',save:'保存大图',url:'/cropbanner'},
   avatar:{title:'🙂 裁剪模特头像',tip:'挑一张脸清晰的正方形区域 · 输出 320×320 圆形展示',save:'保存头像',url:'/cropavatar'}
 };
 function cropImages(slug,cb){
@@ -1288,7 +1293,9 @@ function buildCropModal(){
     '<button class="btn ghost sm" id="cropCancel">取消</button>',
     '<span class="sub" id="cropTip">'+m.tip+'</span></div>',
     '<div class="crop-strip" id="cropStrip"></div>',
-    '<div class="crop-stage" id="cropStage"><img id="cropImgEl" alt=""><div class="crop-box" id="cropBox"></div></div>',
+    '<div class="crop-stage" id="cropStage"><img id="cropImgEl" alt=""><div class="crop-box" id="cropBox"></div>',
+    CROP.mode==='banner'?'<div class="crop-safe"><span>标题文字区（会被压暗/遮住）</span></div>':'',
+    '</div>',
     '<p class="sub" id="cropInfo" style="margin:8px 0 0"></p>'
   ].join('');
   document.body.appendChild(box);
@@ -1496,10 +1503,10 @@ def sets_cards(sets, view='card'):
             <a class="mini" href="http://127.0.0.1:8090/set/{quote(s['slug'])}/index.html" target="_blank" onclick="event.stopPropagation()">预览</a>
             <button class="mini" onclick="event.stopPropagation();togglePin('{s['slug']}',{0 if m.get('pinned') else 1})"
                     title="置顶后出现在首页顶部推荐轮播">{"取消置顶" if m.get("pinned") else "📌 置顶"}</button>
-            <button class="mini" onclick="event.stopPropagation();openBannerCropper('{s['slug']}')"
-                    title="从本套图里选一张裁成首页轮播大图（1600×450）">🖼 大图</button>
-            <button class="mini" onclick="event.stopPropagation();openCropper('{s['slug']}')"
-                    title="从本套图里选一张裁封面（3:4）">✂ 封面</button>
+            <button class="mini" data-slug="{esc_attr(s['slug'])}" onclick="event.stopPropagation();openBannerCropper(this.dataset.slug)"
+                    title="从本套图里选一张裁成首页轮播大图（1600×450）；只有置顶图集才会出现在首页轮播">🖼 大图</button>
+            <button class="mini" data-slug="{esc_attr(s['slug'])}" onclick="event.stopPropagation();openCropper(this.dataset.slug)"
+                    title="从本套图里选一张裁封面（3:4，列表卡片用）">✂ 封面</button>
             <button class="mini" onclick="event.stopPropagation();del('{s['slug']}')">删除</button>
           </div></div></div>""")
     return ''.join(cards) or '<p class="sub">没有匹配的图集</p>'
@@ -2028,8 +2035,8 @@ def models_page(msg=''):
     </span>
   </h2>
   <div class="row" style="margin:8px 0 4px;align-items:center">
-    <button class="btn sm" onclick="openAvatarCropper({json.dumps(model, ensure_ascii=False)})">🙂 设置头像</button>
-    {f'<button class="btn ghost sm" onclick="clearAvatar({json.dumps(model, ensure_ascii=False)})">清除头像</button>' if av else ''}
+    <button class="btn sm" data-m="{esc_attr(model)}" onclick="openAvatarCropper(this.dataset.m)">🙂 设置头像</button>
+    {f'<button class="btn ghost sm" data-m="{esc_attr(model)}" onclick="clearAvatar(this.dataset.m)">清除头像</button>' if av else ''}
     <span class="sub" style="margin:0">从该模特名下任意一套图里挑一张，裁成方形（站点上按圆形展示）</span>
   </div>
   <p class="sub" style="margin-top:6px">资料完整度：{filled} / {len(FIELDS)} 个字段{'' if filled else '（留空的字段不会在站点上展示）'} · 详情页只展示模特名与作品，资料统一在模特页展示</p>
@@ -2155,7 +2162,13 @@ def save_banner(slug, img, box):
     meta['banner'] = {'img': img, 'x': x1, 'y': y1, 'w': x2 - x1, 'h': y2 - y1,
                       'out': f'{BANNER_W}x{BANNER_H}'}
     save_meta(set_dir, meta)
-    return True, f'✓ Banner 已裁剪：{img} 的 {x2 - x1}×{y2 - y1} 区域 → {BANNER_W}×{BANNER_H}'
+    tip = ''
+    if not meta.get('pinned'):
+        tip = ('\n⚠️ 这套还没置顶：首页轮播只显示置顶图集，现在保存了也看不到。'
+               '先在后台卡片上点「📌 置顶」再发布。')
+    elif meta.get('pinUntil') and str(meta['pinUntil']) < time.strftime('%Y-%m-%d'):
+        tip = f'\n⚠️ 置顶已于 {meta["pinUntil"]} 到期，首页轮播不会显示这套。'
+    return True, f'✓ Banner 已裁剪：{img} 的 {x2 - x1}×{y2 - y1} 区域 → {BANNER_W}×{BANNER_H}{tip}'
 
 
 def save_avatar(model, slug, img, box):
@@ -2721,11 +2734,11 @@ def edit_page(slug, msg=''):
     <button class="btn sm" onclick="saveOrder('{slug}')">💾 保存顺序</button>
     <button class="btn ghost sm" onclick="resetOrder()">↺ 还原</button>
     <button class="btn ghost sm" onclick="dedupe('{slug}')">清理重复图片</button>
-    <button class="btn ghost sm" onclick="openCropper('{slug}')">✂ 裁剪封面</button>
-    <button class="btn ghost sm" onclick="openBannerCropper('{slug}')">🖼 裁剪首页大图</button>
+    <button class="btn ghost sm" onclick="openCropper(this.dataset.slug)" data-slug="{esc_attr(slug)}">✂ 裁剪封面</button>
+    <button class="btn ghost sm" onclick="openBannerCropper(this.dataset.slug)" data-slug="{esc_attr(slug)}">🖼 裁剪首页大图</button>
     <span class="sub" style="margin:0">按文件内容比对，保留每组的第一张（新上传已自动去重）</span>
   </div>
-  <div class="sub" style="margin:-6px 0 10px">封面/大图都从本套图里选一张裁剪：封面 3:4（800×1067），首页大图 32:9（1600×450，用于置顶轮播）；点上面按钮后可在弹层里换图、拖拽选区。</div>
+  <div class="sub" style="margin:-6px 0 10px">封面/大图都从本套图里选一张裁剪：封面 3:4（800×1067，列表卡片用）；首页大图 32:9（1600×450，<b>只有置顶图集</b>会出现在首页顶部轮播里）。点按钮后在弹层里换图、拖拽选区；大图弹层下半部分的暗色区域＝首页标题文字压住的位置，重要内容别放那儿。</div>
   <div class="thumbs" id="thumbs">{thumbs or '<p class="sub">暂无图片</p>'}</div>
 </div>"""
     if msg:
