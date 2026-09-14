@@ -121,6 +121,17 @@ def slugify(s: str) -> str:
     return re.sub(r'-{2,}', '-', s).strip('-') or 'set'
 
 
+def unique_slug(base):
+    """目录名已被占用时自动加 -2 / -3 …（同名作品＝两套独立图集，不互相覆盖）"""
+    if not os.path.isdir(os.path.join(SETS_DIR, base)):
+        return base
+    for i in range(2, 500):
+        cand = f'{base}-{i}'
+        if not os.path.isdir(os.path.join(SETS_DIR, cand)):
+            return cand
+    return f'{base}-{int(time.time())}'
+
+
 def make_thumb(src_bytes: bytes, dst: str, max_side: int, quality: int = THUMB_Q, box=None):
     """生成缩略图。
 
@@ -3613,7 +3624,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._text('请至少上传一张图片', 400)
 
         d = g('date') or date.today().isoformat()
-        slug = g('slug') or f'{d}-{slugify(title)}'
+        custom_slug = (g('slug') or '').strip()
+        slug = custom_slug or f'{d}-{slugify(title)}'
+        # 同名同日期：自动加 -2 / -3 … 变成两套独立图集
+        # （原来会直接合并进同一个目录：第二套的图片被追加到第一套里、标题被覆盖 —— 很难发现）
+        renamed_from = ''
+        if not custom_slug:
+            uniq = unique_slug(slug)
+            if uniq != slug:
+                renamed_from, slug = slug, uniq
         set_dir = os.path.join(SETS_DIR, slug)
         img_dir, thumb_dir = os.path.join(set_dir, 'images'), os.path.join(set_dir, 'thumbs')
         os.makedirs(img_dir, exist_ok=True)
@@ -3714,12 +3733,15 @@ class Handler(BaseHTTPRequestHandler):
         same_title = [s['slug'] for s in list_sets()
                       if s['slug'] != slug and (s['meta'].get('title') or '').strip() == title.strip()]
         dup_warn = ''
+        if renamed_from:
+            dup_warn += (f'ℹ️ 已有同名同日期的图集（目录 {renamed_from}）→ 这套自动存成独立目录 {slug}\n'
+                         f'   两套内容是分开的，各自可单独编辑 / 隐藏；想让标题也能区分，可在编辑页改标题。\n')
         if dup_sets:
-            dup_warn = (f'⚠️ 这套图集的内容与已有图集完全相同：{", ".join(dup_sets)}\n'
-                        f'   如果只是重复导入，可到后台删掉其中一套（列表卡片右下角「删除」）。\n')
+            dup_warn += (f'⚠️ 这套图集的内容与已有图集完全相同：{", ".join(dup_sets)}\n'
+                         f'   如果只是重复导入，可到后台删掉其中一套（列表卡片右下角「删除」）。\n')
         elif same_title:
-            dup_warn = (f'⚠️ 已有同名图集（标题相同、内容不同）：{", ".join(same_title)}\n'
-                        f'   如果这是同一套图的新版本，建议先删掉旧的。\n')
+            dup_warn += (f'ℹ️ 另有同名图集（标题相同、内容不同）：{", ".join(same_title)}\n'
+                         f'   同名是允许的，两套会各自显示；需要的话在编辑页把标题改得更好区分。\n')
 
         if g('norebuild') in ('1', 'on', 'true'):
             # 批量导入：不逐套重建（前端在全部完成后统一调一次 /rebuild），直接回 JSON
@@ -3728,11 +3750,12 @@ class Handler(BaseHTTPRequestHandler):
                                'dup': dup, 'errors': errors, 'cover': cover_info,
                                'dup_of': dup_sets, 'same_title': same_title, 'autotag': tag_info.strip()})
         ok, out = rebuild()
+        _detail_rel = ('h/' + hidden_token(slug, meta.get('hidePassword') or hidden_pw())) if meta.get('hidden') else ('set/' + slug)
         msg = (f'✓ 上传完成：{slug}\n  本次新增 {len(saved)} 张，共 {len(all_imgs)} 张，{cover_info}\n'
                + (f'  已跳过 {dup} 张重复图片（内容相同）\n' if dup else '')
                + dup_warn
                + tag_info
-               + f'  编辑：http://127.0.0.1:{PORT}/edit?slug={slug}\n  详情页：http://127.0.0.1:8090/set/{slug}/index.html\n'
+               + f'  编辑：http://127.0.0.1:{PORT}/edit?slug={slug}\n  详情页：http://127.0.0.1:8090/{_detail_rel}/index.html\n'
                + (f'  警告：{"; ".join(errors)}\n' if errors else '')
                + '  重建：' + ('成功' if ok else '失败') + '\n' + out)
         self._html(home_page(msg))
