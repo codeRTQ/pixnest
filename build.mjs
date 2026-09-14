@@ -638,11 +638,19 @@ function pagerHtml(page, totalPages, hrefOf) {
   </nav>`
 }
 
-/** 置顶推荐轮播（列表页顶部；没有置顶图集时返回空串，页面自动退回标题样式）
+/** 置顶推荐轮播（列表页顶部，每一页都有；没有置顶图集时给一个空位 + 提示）
  *  布局：左边 16:9 轮播舞台 + 右边置顶清单（点清单可切换，不用等自动播放）
  *  隐藏图集也能置顶：轮播里只显示模糊封面 + 🔒，点击要输密码（解锁后自动换成真实封面） */
 function heroHtml(pinned, rel = '') {
-  if (!pinned.length) return ''
+  if (!pinned.length) return `<section class="hero single" id="hero" aria-label="置顶推荐">
+    <div class="hero-track hero-placeholder">
+      <span class="hero-ph-badge">📌 置顶推荐</span>
+      <p class="hero-ph-title">还没有置顶内容</p>
+      <p class="hero-ph-sub">${PUBLIC
+        ? '把喜欢的套图设为置顶后，会显示在这个位置。'
+        : '在后台「套图管理」里点这套图的「📌 置顶」按钮即可（编辑页里也能勾选「置顶推荐」并排顺序）。'}</p>
+    </div>
+  </section>`
   // 轮播大图：后台裁过 Banner 就用 Banner（默认仍用封面）；隐藏图集用公开的模糊小图
   const pic = (s) => s.hidden
     ? (s.blurThumb ? { f: blurUrl(s.slug, '../'), v: '', banner: false, locked: true } : null)
@@ -704,10 +712,10 @@ function heroHtml(pinned, rel = '') {
 }
 
 function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets = null, pinned = []) {
-  const hasHero = page === 1 && pinned.length > 0
+  // 置顶窗口每一页都显示：没有置顶内容时它就是一个空位 + 提示（不再退回「全部图集」标题）
   const body = `
-  ${hasHero ? heroHtml(pinned, rel) : ''}
-  <div class="page-head"${hasHero ? ' hidden' : ''}>${hasHero ? '' : '<h1>全部图集</h1>'}</div>
+  ${heroHtml(pinned, rel)}
+  <div class="page-head" hidden></div>
   <div class="filters" id="filters">
     <span class="filter-label">排序</span>
     <span class="sort-chips" id="sortChips" role="group" aria-label="排序方式">
@@ -1221,9 +1229,17 @@ img{max-width:100%;display:block}
 .to-top{position:fixed;right:22px;bottom:26px;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);
   background:var(--panel);color:var(--fg);font-size:18px;cursor:pointer;z-index:30;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .to-top:hover{border-color:var(--accent)}
-/* 置顶推荐轮播（列表页顶部）：左轮播舞台 + 右置顶清单 */
-.hero{display:grid;grid-template-columns:minmax(0,1fr) 284px;gap:14px;margin:18px 0 16px;align-items:stretch}
+/* 置顶推荐轮播（列表页顶部，每页都有）：左轮播舞台 + 右置顶清单 */
+.hero{display:grid;grid-template-columns:minmax(0,1fr) 284px;gap:14px;margin:18px 0 16px;align-items:start}
 .hero.single{grid-template-columns:1fr}
+/* 没有置顶内容时的空位：虚线框 + 提示（点这里不做事，只是告诉站长去哪加） */
+.hero-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;
+  border:1px dashed var(--line);border-radius:14px;background:var(--panel);text-align:center;padding:24px}
+.hero-ph-badge{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:3px 12px;
+  font-size:12px;color:var(--accent2);font-weight:600}
+.hero-placeholder p{margin:0}
+.hero-ph-title{font-size:15px;font-weight:600;color:var(--fg)}
+.hero-ph-sub{font-size:12.5px;color:var(--dim);line-height:1.75;max-width:560px}
 .hero-stage{position:relative;border-radius:14px;overflow:hidden;background:var(--panel);border:1px solid var(--line)}
 .hero-track{position:relative;aspect-ratio:${config.heroRatio || '21/9'};max-height:${config.heroMaxHeight || 380}px;min-height:150px}
 .hero-slide{position:absolute;inset:0;display:block;opacity:0;transition:opacity .55s ease;text-decoration:none;color:#fff;pointer-events:none}
@@ -1258,15 +1274,11 @@ img{max-width:100%;display:block}
 .hero-dots{position:absolute;right:18px;bottom:14px;z-index:3;display:flex;gap:6px}
 .hero-dot{width:8px;height:8px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.45);cursor:pointer}
 .hero-dot.on{background:#fff;width:20px;border-radius:999px}
-/* 右侧置顶清单：高度锁定与轮播齐平、置顶再多也只在内部滚动，不会把版面撑长
-   滚动条隐藏（用滚轮/悬停切换），选中项始终居中 */
-.hero-list{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;min-height:0;align-self:stretch}
-.hero-list-inner{position:absolute;inset:12px;overflow-y:auto;overscroll-behavior:contain;scroll-behavior:smooth;
-  display:flex;flex-direction:column;gap:4px;padding-right:2px;
-  scrollbar-width:none;-ms-overflow-style:none}
-.hero-list-inner::-webkit-scrollbar{width:0;height:0;display:none}
-.hero-list h3{margin:0 0 8px;font-size:13px;color:var(--accent2);font-weight:600;position:sticky;top:0;
-  background:var(--panel);padding-bottom:6px;z-index:2}
+/* 右侧置顶清单：不再自己内部滚动 —— 滚轮永远滚整个页面，置顶多就跟着页面一起往下排
+   （以前是固定高度 + 内部滚动条，鼠标放上去滚轮只滚清单、页面不动，很别扭） */
+.hero-list{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;align-self:start}
+.hero-list-inner{display:flex;flex-direction:column;gap:4px}
+.hero-list h3{margin:0 0 8px;font-size:13px;color:var(--accent2);font-weight:600}
 .hero-item{display:flex;gap:10px;align-items:center;padding:6px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
 .hero-item:hover{background:var(--panel2)}
 .hero-item.on{background:var(--panel2)}   /* 选中不描蓝边，靠缩略图放大区分 */
@@ -1955,8 +1967,8 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         const hero = document.getElementById('hero');
         if (hero) hero.hidden = !!q;                       // 搜索/筛选时先收起推荐轮播
         if (head) {
-          // 只有"搜索中"才显示标题区（带匹配条数 + 清除筛选）；平时列表上方不摆那行体量说明
-          // （体量信息在页脚）—— 标题区为空时整块隐藏，避免留出空白间距
+          // 「全部图集」这个标题已去掉：列表上方平时什么都不显示（体量信息在页脚），
+          // 只有"搜索中"才占用这块地方显示匹配条数 + 清除筛选
           const sortLabel = SORT_LABEL[SORT] || '最新发布';
           const isDefaultSort = SORT === 'date-desc';
           if (q) {
@@ -1964,12 +1976,9 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
             head.innerHTML = '<h1>搜索结果</h1><p class="sub">匹配「' + esc(q) + '」共 ' + all.length + ' 套'
               + (isDefaultSort ? '' : ' · 按' + esc(sortLabel))
               + ' · <a href="' + base + 'index.html" class="dim">清除筛选</a></p>';
-          } else if (hero) {
-            head.hidden = true;                             // 有轮播的首页：标题区整块不显示
-            head.innerHTML = '';
           } else {
-            head.hidden = false;                            // 无轮播的页面保留「全部图集」标题
-            head.innerHTML = '<h1>全部图集</h1>';
+            head.hidden = true;
+            head.innerHTML = '';
           }
         }
         // 静态分页只在没筛选时显示；筛选时用客户端分页（注意别抓错元素：客户端那条也在 .pagination-wrap 里）
@@ -2053,31 +2062,14 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         const slides = [...heroBox.querySelectorAll('.hero-slide')];
         const dots = [...heroBox.querySelectorAll('.hero-dot')];
         const items = [...heroBox.querySelectorAll('.hero-item')];
-        const listInner = heroBox.querySelector('.hero-list-inner');
-        // 选中项始终滚到可视区正中间（清单比轮播高时才有意义）
-        const centerItem = (k) => {
-          const el = items[k];
-          if (!el || !listInner || listInner.scrollHeight <= listInner.clientHeight + 2) return;
-          const cr = listInner.getBoundingClientRect(), er = el.getBoundingClientRect();
-          const delta = (er.top - cr.top) - (cr.height / 2 - er.height / 2);
-          listInner.scrollTo({ top: listInner.scrollTop + delta, behavior: 'smooth' });
-        };
-        // 滚轮：只滚清单本身（不带动页面），每次一格匀速
-        if (listInner) {
-          listInner.addEventListener('wheel', (e) => {
-            if (listInner.scrollHeight <= listInner.clientHeight + 2) return;   // 没得滚就交给页面
-            e.preventDefault();
-            listInner.scrollTop += e.deltaY;
-          }, { passive: false });
-        }
+        // 清单不再内部滚动：轮播切到哪一张只改高亮，不碰页面滚动位置
         if (slides.length > 1) {
           let hi = 0, ht = null;
-          const show = (i, center) => {
+          const show = (i) => {
             hi = (i + slides.length) % slides.length;
             slides.forEach((el, k) => el.classList.toggle('on', k === hi));
             dots.forEach((el, k) => el.classList.toggle('on', k === hi));
             items.forEach((el, k) => el.classList.toggle('on', k === hi));
-            if (center !== false) centerItem(hi);
           };
           const stop = () => { if (ht) { clearInterval(ht); ht = null; } };
           const play = () => { stop(); ht = setInterval(() => show(hi + 1), 5000); };
@@ -2085,7 +2077,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
           heroBox.querySelector('.hero-prev').addEventListener('click', () => jump(hi - 1));
           heroBox.querySelector('.hero-next').addEventListener('click', () => jump(hi + 1));
           dots.forEach((el, k) => el.addEventListener('click', () => jump(k)));
-          items.forEach((el, k) => el.addEventListener('mouseenter', () => { show(k); centerItem(k); }));
+          items.forEach((el, k) => el.addEventListener('mouseenter', () => show(k)));
           heroBox.addEventListener('mouseenter', stop);
           heroBox.addEventListener('mouseleave', play);
           let hx = null;
@@ -2096,7 +2088,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
             if (Math.abs(dx) > 40) show(hi + (dx < 0 ? 1 : -1));
             hx = null; play();
           }, { passive: true });
-          show(0, false); play();
+          show(0); play();
         }
       }
       // 函数都就位了，现在才安全地按 URL 里的 ?q= 渲染初始结果
