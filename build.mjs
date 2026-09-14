@@ -597,8 +597,8 @@ const socialUrl = (k, v) => {
     ins: 'https://www.instagram.com/' + encodeURIComponent(clean),
   }[k] || ''
 }
-/** 模特资料 → 一段引文式 HTML（没填任何字段就返回空串） */
-function profileQuoteHtml(pf = {}, extraClass = '') {
+/** 模特资料字段 → { parts: 文字片段, socials: 社交片段 }（供引文版和侧栏卡片版共用） */
+function profileBits(pf = {}) {
   const parts = []
   PF_ORDER.forEach(([k, label]) => {
     if (!pf[k]) return
@@ -612,11 +612,23 @@ function profileQuoteHtml(pf = {}, extraClass = '') {
     const u = socialUrl(k, v)
     return `${PF_SOCIAL[k]} ${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}`
   })
+  return { parts, socials }
+}
+/** 模特资料 → 一段引文式 HTML（没填任何字段就返回空串） */
+function profileQuoteHtml(pf = {}, extraClass = '') {
+  const { parts, socials } = profileBits(pf)
   if (!parts.length && !socials.length) return ''
   return `<blockquote class="pf-quote${extraClass ? ' ' + extraClass : ''}">`
     + (parts.length ? `<p>${parts.join(' · ')}</p>` : '')
     + (socials.length ? `<p class="pf-social">${socials.join(' · ')}</p>` : '')
     + '</blockquote>'
+}
+/** 模特资料 → 侧栏卡片里的紧凑几行（没填就返回空串，卡片本身保持不变） */
+function profileLines(pf = {}) {
+  const { parts, socials } = profileBits(pf)
+  if (!parts.length && !socials.length) return ''
+  return (parts.length ? `<p class="sm-pf">${parts.join(' · ')}</p>` : '')
+    + (socials.length ? `<p class="sm-pf sm-social">${socials.join(' · ')}</p>` : '')
 }
 
 /** 单个模特的页面：资料引文 + 该模特的全部图集（按系列分组时给出系列芯片）*/
@@ -733,8 +745,14 @@ function seriesIndexPage(bySeries, allSets) {
 
 function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}, moreSets = [], modelTotal = 0) {
   const rel = '../../'
-  // 模特资料引文（搬到右侧栏「👤 模特与系列」里展示）
-  const profileBlock = profileQuoteHtml(s.profile || {}, 'side-quote')
+  // 模特资料（侧栏卡片里显示成几行小字；填没填都长同一张卡，差别只是这几行）
+  const pfLines = profileLines(s.profile || {})
+  const modelCard = (s.model || pfLines)
+    ? `<div class="side-model">
+        ${s.model ? `<a class="sm-name" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品">${esc(s.model)}<span class="dim">${modelTotal > 1 ? ` · ${modelTotal} 套图集` : ' · 全部作品'}</span></a>` : ''}
+        ${pfLines}
+      </div>`
+    : ''
 
   const previews = s.previews.length
     ? `<div class="previews" id="gallery">
@@ -818,11 +836,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
     </section>
     ${(s.model || s.series) ? `<section class="side-box">
       <h3 class="side-title">👤 模特与系列</h3>
-      ${profileBlock
-        ? `<p class="side-sub first">模特信息${s.model ? `<span class="dim"> · ${esc(s.model)}</span>` : ''}</p>${profileBlock}`
-        : `<div class="side-links">
-        ${s.model ? `<a class="side-link" href="${rel}model/${encodeURIComponent(s.model)}.html">${esc(s.model)} <span class="dim">的全部作品${modelTotal > 1 ? `（${modelTotal} 套）` : ''}</span></a>` : ''}
-      </div>`}
+      ${modelCard}
       ${s.series ? `<div class="side-links"><a class="side-link" href="${rel}series/${encodeURIComponent(s.series)}.html">${esc(s.series)} <span class="dim">系列全部</span></a></div>` : ''}
       ${moreSets.length ? `<div class="side-sets">
         <p class="side-sub">${esc(s.model || s.series)} 的其他作品</p>
@@ -835,7 +849,6 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
             <span class="ss-meta">${esc(x.date)} · ${x.imageCount}P${x.sizeText ? ' · ' + esc(x.sizeText) : (x.packSize ? ' · ' + esc(x.packSize) : '')}</span>
           </span>
         </a>`).join('')}
-        ${modelTotal > moreSets.length + 1 ? `<a class="side-more" href="${rel}model/${encodeURIComponent(s.model || '')}.html">查看全部 ${modelTotal} 套 →</a>` : ''}
       </div>` : ''}
     </section>` : ''}
     ${hotTags.length ? `<section class="side-box">
@@ -1123,14 +1136,15 @@ img{max-width:100%;display:block}
 /* 侧栏：模特的其他作品（缩略图 + 标题 + 日期/张数） */
 .side-sub{margin:9px 0 6px;font-size:12px;color:var(--dim);border-top:1px solid var(--line);padding-top:8px}
 .side-sub.first{margin-top:0;border-top:0;padding-top:0}
-/* 侧栏里的模特资料引文（原正文顶部的那段，搬进侧栏后收紧排版）
-   用 .pf-quote.side-quote 提高权重，否则会被后面的 .pf-quote 覆盖 */
-.pf-quote.side-quote{margin:0 0 4px;padding:8px 0 8px 11px;font-size:12.5px;line-height:1.9;
-  border-left:3px solid var(--accent2);background:linear-gradient(90deg,rgba(255,180,84,.10),transparent 70%)}
-/* 亮色主题下 .pf-quote 有自己的背景规则，权重更高，这里单独再盖一次 */
-html[data-theme="light"] .pf-quote.side-quote{background:linear-gradient(90deg,rgba(255,180,84,.16),transparent 70%)}
-.pf-quote.side-quote p{margin:0}
-.pf-quote.side-quote p + p{margin-top:5px}
+/* 模特卡片：填没填资料都长同一张卡，第一行永远是「模特名 → 模特页」，
+   填过资料的只是下面多两行小字，不再出现两种完全不同的排版 */
+.side-model{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:7px 11px}
+.sm-name{display:block;font-size:13px;font-weight:600;color:var(--fg);text-decoration:none}
+.sm-name:hover{color:var(--accent)}
+.sm-name .dim{font-weight:400}
+.sm-pf{margin:4px 0 0;font-size:12px;line-height:1.6;color:var(--dim)}
+.sm-pf.sm-social a{color:var(--accent);text-decoration:none}
+.sm-pf.sm-social a:hover{text-decoration:underline}
 .side-sets{display:flex;flex-direction:column;gap:3px}
 .side-set{display:flex;gap:8px;align-items:center;padding:4px 5px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
 .side-set:hover{background:var(--panel2)}
@@ -1140,8 +1154,6 @@ html[data-theme="light"] .pf-quote.side-quote{background:linear-gradient(90deg,r
 .ss-body b{font-size:12.5px;line-height:1.4;font-weight:600;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ss-meta{font-size:11.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.side-more{display:block;margin-top:6px;font-size:12.5px;color:var(--accent);text-decoration:none}
-.side-more:hover{text-decoration:underline}
 .side-box .btn{width:100%;justify-content:center;display:flex}
 .side-note{margin:6px 0 0;font-size:12px;line-height:1.6;color:var(--dim)}
 .side-note code{background:var(--panel2);padding:1px 6px;border-radius:5px;color:var(--fg)}
@@ -1166,12 +1178,12 @@ html[data-theme="light"] .pf-quote.side-quote{background:linear-gradient(90deg,r
   .side-dl-box .side-dl{padding:5px 12px;font-size:13px}
   .side-note{font-size:11.5px;line-height:1.5}
   .side-sub{margin:6px 0 4px;padding-top:5px}
-  .pf-quote.side-quote{font-size:12px;line-height:1.7;padding:6px 0 6px 10px}
+  .side-model{padding:6px 10px}
+  .sm-pf{font-size:11.5px;line-height:1.55;margin-top:3px}
   .ss-cover{flex-basis:36px;width:36px;height:47px}
   .side-set{padding:2px 4px}
   .side-sets{gap:2px}
   .ss-body b{font-size:12px}
-  .side-more{margin-top:3px}
   .side-info{gap:3px 10px;font-size:11.8px}
   .side-tag{padding:1px 8px;font-size:11.5px}
   .side-tags + .side-note{display:none}      /* 标签框里的"查看全部标签"让位给一屏显示 */
