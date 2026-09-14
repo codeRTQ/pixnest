@@ -535,6 +535,18 @@ ${ADULT_GATE}
 </body>
 </html>`
 
+/** 卡片上的「模特行」：头像 + 模特名 + 日期（参照同类站的展示；没填模特时只显示日期） */
+function cardModelRow(s, rel = '', opts = {}) {
+  const face = !opts.noModel && s.model ? MODEL_FACE[s.model] : ''
+  const avatar = face
+    ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${face}" alt="${esc(s.model)}"></a>`
+    : ''
+  const name = (!opts.noModel && s.model)
+    ? `<a class="card-model-name" href="${rel}model/${encodeURIComponent(s.model)}.html">${esc(s.model)}</a><span class="sep">·</span>`
+    : ''
+  return `${avatar}${name}<time datetime="${esc(s.date)}">${esc(s.date)}</time>`
+}
+
 const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   // 隐藏但没配密码（构建时算不出私有地址）→ 只给一张糊图，没有任何入口
   ? `<article class="card card-locked" data-hid="${esc(s.slug)}">
@@ -542,10 +554,8 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
     ${s.blurThumb ? `<img class="blurred" src="${rel}blur/${esc(s.slug)}.webp" alt="">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
   </div>
-  <div class="card-head">
-    ${!opts.noModel && s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
-    <h2 class="card-title">${esc(s.title)}</h2>
-  </div>
+  <h2 class="card-title">${esc(s.title)}</h2>
+  <div class="card-model">${cardModelRow(s, rel, opts)}</div>
   <div class="card-meta"><span class="lock-hint">还没设置隐藏密码</span></div>
 </article>`
   : s.hiddenOk
@@ -554,14 +564,11 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
     ${s.blurThumb ? `<img class="blurred"${opts.eager ? '' : ' loading="lazy"'} src="${rel}blur/${esc(s.slug)}.webp" alt="${esc(s.title)}">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
   </div>
-  <div class="card-head">
-    ${!opts.noModel && s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
-    <h2 class="card-title">${esc(s.title)}</h2>
-  </div>
+  <h2 class="card-title">${esc(s.title)}</h2>
+  <div class="card-model">${cardModelRow(s, rel, opts)}</div>
   <div class="card-meta">
     <button class="unlock-btn" data-hid="${esc(s.slug)}" title="${esc(HIDDEN_HINT)}">🔓 输入密码查看</button>
     ${s.dupTag && s.dupTag !== s.model ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
-    <time datetime="${esc(s.date)}">${esc(s.date)}</time>
   </div>
 </article>`
   : `
@@ -576,15 +583,12 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
       ${s.pinned ? '<span class="badge badge-pin" title="置顶推荐">📌 置顶</span>' : ''}
     </div>
   </a>
-  <div class="card-head">
-    ${!opts.noModel && s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
-    <a class="card-link title-link" href="${rel}set/${s.slug}/index.html"><h2 class="card-title">${esc(s.title)}</h2></a>
-  </div>
+  <a class="card-link title-link" href="${rel}set/${s.slug}/index.html"><h2 class="card-title">${esc(s.title)}</h2></a>
+  <div class="card-model">${cardModelRow(s, rel, opts)}</div>
   <div class="card-meta">
     ${s.dupTag && s.dupTag !== s.model ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
     ${s.series ? `<a class="tag tag-series" href="${rel}series/${encodeURIComponent(s.series)}.html" title="查看该系列全部图集">${esc(s.series)}</a>` : ''}
     ${s.tags.slice(0, 2).map(t => `<a class="tag tag-link" href="${rel}tag/${encodeURIComponent(t)}.html" title="查看同标签图集">${esc(t)}</a>`).join('')}
-    <time datetime="${esc(s.date)}">${esc(s.date)}</time>
   </div>
 </article>`
 
@@ -1223,14 +1227,18 @@ img{max-width:100%;display:block}
   .hero-dots{left:14px;bottom:14px}
 }
 .badge-pin{left:8px;top:auto;bottom:8px;background:rgba(255,180,84,.92);color:#1a1206;font-weight:600}
-/* 标题行：模特头像在前，名字在后（点头像进模特页，点名字进图集） */
-.card-head{display:flex;align-items:center;gap:8px;padding:12px 12px 6px}
-.card-head .card-title{padding:0;flex:1;min-width:0}
-.card-avatar{flex:0 0 30px;width:30px;height:30px;border-radius:50%;overflow:hidden;display:block;
+/* 模特行：头像 + 模特名 + 日期（点头像/名字进模特页，点日期无动作） */
+.card-model{display:flex;align-items:center;gap:7px;padding:0 12px 8px;font-size:12px;color:var(--dim);
+  white-space:nowrap;overflow:hidden}
+.card-avatar{flex:0 0 26px;width:26px;height:26px;border-radius:50%;overflow:hidden;display:block;
   border:1px solid var(--line);background:var(--panel2);transition:transform .15s,border-color .15s}
 .card-avatar img{width:100%;height:100%;object-fit:cover;display:block}
 .card-avatar:hover{transform:scale(1.08);border-color:var(--accent)}
-.cover-link{display:block;width:100%;height:100%;position:relative}
+.card-model-name{color:var(--fg);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;max-width:45%}
+.card-model-name:hover{color:var(--accent)}
+.card-model .sep{opacity:.55}
+.card-model time{margin-left:auto}
+.cover-link{display:block;width:100%;height:auto;position:relative}
 .title-link{text-decoration:none;color:inherit;display:block;min-width:0}
 .pagination-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;margin:30px 0 10px}
 .pagination-wrap[hidden]{display:none}   /* CSS 的 display 会盖掉 hidden 属性，必须显式声明 */
@@ -1633,20 +1641,27 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     const base = location.pathname.includes('/page/') ? '../../' : '';
     let INDEX = null;
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    // 模特行：头像 + 模特名 + 日期（与静态卡片保持一致）
+    const cardModelRowJS = (s, base) => {
+      const face = s.model && MODEL_FACE[s.model] ? MODEL_FACE[s.model] : '';
+      const href = s.model ? base + 'model/' + encodeURIComponent(s.model) + '.html' : '';
+      return (face ? '<a class="card-avatar" href="' + href + '"><img loading="lazy" src="' + base + face + '" alt="' + esc(s.model) + '"></a>' : '')
+        + (s.model ? '<a class="card-model-name" href="' + href + '">' + esc(s.model) + '</a><span class="sep">·</span>' : '')
+        + '<time>' + esc(s.date) + '</time>';
+    };
     const cardHtml = (s) => s.locked ? [
       '<article class="card card-locked" data-hid="' + esc(s.slug) + '" data-cover="cover.webp">',
       '<div class="card-cover locked">',
       (s.cover ? '<img class="blurred" loading="lazy" src="' + base + s.cover + '" alt="' + esc(s.title) + '">' : '<div class="no-cover">🔒</div>'),
       '<span class="badge badge-lock">🔒 隐藏</span>',
       '</div>',
-      '<div class="card-head">',
-      (s.model && MODEL_FACE[s.model] ? '<a class="card-avatar" href="' + base + 'model/' + encodeURIComponent(s.model) + '.html" title="查看 ' + esc(s.model) + ' 的全部作品"><img loading="lazy" src="' + base + MODEL_FACE[s.model] + '" alt="' + esc(s.model) + '"></a>' : ''),
       '<h2 class="card-title">' + esc(s.title) + '</h2>',
+      '<div class="card-model">',
+      cardModelRowJS(s, base),
       '</div>',
       '<div class="card-meta">',
       (s.dupTag && s.dupTag !== s.model ? '<span class="tag tag-model">' + esc(s.dupTag) + '</span>' : ''),
       '<button class="unlock-btn" data-hid="' + esc(s.slug) + '">🔓 输入密码查看</button>',
-      '<time>' + esc(s.date) + '</time>',
       '</div></article>',
     ].join('') : [
       '<article class="card">',
@@ -1658,15 +1673,14 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       (s.pinned ? '<span class="badge badge-pin" title="置顶推荐">📌 置顶</span>' : ''),
       '</div>',
       '</a>',
-      '<div class="card-head">',
-      (s.model && MODEL_FACE[s.model] ? '<a class="card-avatar" href="' + base + 'model/' + encodeURIComponent(s.model) + '.html" title="查看 ' + esc(s.model) + ' 的全部作品"><img loading="lazy" src="' + base + MODEL_FACE[s.model] + '" alt="' + esc(s.model) + '"></a>' : ''),
       '<a class="card-link title-link" href="' + base + 'set/' + encodeURIComponent(s.slug) + '/index.html"><h2 class="card-title">' + esc(s.title) + '</h2></a>',
+      '<div class="card-model">',
+      cardModelRowJS(s, base),
       '</div>',
       '<div class="card-meta">',
       (s.dupTag && s.dupTag !== s.model ? '<span class="tag tag-model">' + esc(s.dupTag) + '</span>' : ''),
       (s.series ? '<a class="tag tag-series" href="' + base + 'series/' + encodeURIComponent(s.series) + '.html">' + esc(s.series) + '</a>' : ''),
       (s.tags || []).slice(0, 2).map(t => '<a class="tag tag-link" href="' + base + 'tag/' + encodeURIComponent(t) + '.html">' + esc(t) + '</a>').join(''),
-      '<time>' + esc(s.date) + '</time>',
       '</div></article>',
     ].join('');
     const hits = (s, q) => {
