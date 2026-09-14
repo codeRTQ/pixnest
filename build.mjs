@@ -1106,10 +1106,14 @@ img{max-width:100%;display:block}
 .page-head h1{margin:0;font-size:22px}
 .page-head .sub{color:var(--dim);margin:4px 0 0;font-size:13px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;transition:transform .15s,border-color .15s}
-.card:hover{transform:translateY(-3px);border-color:var(--accent)}
+/* 卡片：选中/悬停不出现彩色描边，改成"图片轻微放大 + 轻微抬起投影" */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+  transition:transform .2s ease,box-shadow .2s ease}
+.card:hover{transform:translateY(-3px);box-shadow:0 10px 28px rgba(0,0,0,.13)}
 .card-cover{position:relative;aspect-ratio:3/4;background:var(--panel2) center/cover no-repeat;overflow:hidden}
-.card-cover img{width:100%;height:100%;object-fit:cover}
+.card-cover img{width:100%;height:100%;object-fit:cover;transition:transform .35s ease}
+.card:hover .card-cover img{transform:scale(1.06)}
+.card:hover .card-cover img.blurred{transform:scale(1.22)}   /* 隐藏卡的糊图：放大但保持模糊 */
 .no-cover{display:flex;align-items:center;justify-content:center;height:100%;color:var(--dim)}
 .badge{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.65);color:#fff;font-size:12px;padding:2px 8px;border-radius:999px}
 .badge-size{left:auto;right:8px;background:rgba(91,140,255,.85)}
@@ -1155,7 +1159,7 @@ img{max-width:100%;display:block}
 .pn-toast.err{border-color:rgba(255,96,96,.6)}
 /* 模特头像（后台裁剪生成，圆形）：xs 列表卡片 / sm 侧栏 / md 模特页标题 */
 .mavatar{display:inline-flex;flex:0 0 auto;border-radius:50%;overflow:hidden;background:var(--panel2);
-  border:1px solid var(--line);vertical-align:middle}
+  border:1px solid var(--line);vertical-align:middle;transition:transform .2s ease}
 .mavatar img{width:100%;height:100%;object-fit:cover;display:block}
 .mavatar-xs{width:24px;height:24px}
 .mavatar-sm{width:38px;height:38px}
@@ -1212,8 +1216,10 @@ img{max-width:100%;display:block}
   background:var(--panel);padding-bottom:6px;z-index:2}
 .hero-item{display:flex;gap:10px;align-items:center;padding:6px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
 .hero-item:hover{background:var(--panel2)}
-.hero-item.on{background:var(--panel2);box-shadow:inset 0 0 0 1px var(--accent)}
-.hero-item img{width:44px;height:59px;flex:0 0 44px;border-radius:6px;object-fit:cover;background:var(--panel2)}
+.hero-item.on{background:var(--panel2)}   /* 选中不描蓝边，靠缩略图放大区分 */
+.hero-item img{width:44px;height:59px;flex:0 0 44px;border-radius:6px;object-fit:cover;background:var(--panel2);
+  transition:transform .3s ease}
+.hero-item:hover img,.hero-item.on img{transform:scale(1.08)}
 .hero-item-text{min-width:0;display:flex;flex-direction:column;gap:3px}
 .hero-item-text b{font-size:13px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .hero-item-text span{font-size:11.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1231,9 +1237,9 @@ img{max-width:100%;display:block}
 .card-model{display:flex;align-items:center;gap:7px;padding:0 12px 8px;font-size:12px;color:var(--dim);
   white-space:nowrap;overflow:hidden}
 .card-avatar{flex:0 0 26px;width:26px;height:26px;border-radius:50%;overflow:hidden;display:block;
-  border:1px solid var(--line);background:var(--panel2);transition:transform .15s,border-color .15s}
-.card-avatar img{width:100%;height:100%;object-fit:cover;display:block}
-.card-avatar:hover{transform:scale(1.08);border-color:var(--accent)}
+  border:1px solid var(--line);background:var(--panel2);transition:transform .2s ease}
+.card-avatar img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .2s ease}
+.card-avatar:hover{transform:scale(1.12)}   /* 只放大，不变色 */
 .card-model-name{color:var(--fg);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;max-width:45%}
 .card-model-name:hover{color:var(--accent)}
 .card-model .sep{opacity:.55}
@@ -1344,11 +1350,12 @@ img{max-width:100%;display:block}
 .side-rows{display:flex;flex-direction:column;gap:6px}
 .side-row{display:flex;align-items:center;gap:9px;padding:5px 9px 5px 5px;border:1px solid var(--line);
   border-radius:10px;background:var(--panel2);color:var(--fg);text-decoration:none;transition:.15s}
-.side-row:hover{border-color:var(--accent);background:var(--panel);transform:translateX(1px)}
+.side-row:hover{background:var(--panel)}   /* 悬停只换底色 + 头像放大，不描蓝边 */
 .side-row:hover .sr-go{color:var(--accent)}
 .sr-art{flex:0 0 38px;width:38px;height:50px;border-radius:7px;overflow:hidden;background:var(--panel);
   display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1}
-.sr-art img{width:100%;height:100%;object-fit:cover;display:block}
+.sr-art img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .28s ease}
+.side-row:hover .sr-art img{transform:scale(1.09)}
 .sr-art.sr-round{width:38px;height:38px;border-radius:50%}   /* 有自定义头像时用圆形 */
 .sr-body{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
 .sr-body b{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1358,7 +1365,8 @@ img{max-width:100%;display:block}
 .side-set{display:flex;gap:8px;align-items:center;padding:4px 5px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
 .side-set:hover{background:var(--panel2)}
 .ss-cover{flex:0 0 38px;width:38px;height:50px;border-radius:7px;overflow:hidden;background:var(--panel2)}
-.ss-cover img{width:100%;height:100%;object-fit:cover;display:block}
+.ss-cover img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .28s ease}
+.side-set:hover .ss-cover img,.side-set:hover .sr-art img{transform:scale(1.09)}
 .ss-body{min-width:0;display:flex;flex-direction:column;gap:2px}
 .ss-body b{font-size:12.5px;line-height:1.4;font-weight:600;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
