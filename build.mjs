@@ -580,7 +580,7 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   <h2 class="card-title">${esc(s.title)}</h2>
   <div class="card-model">${cardModelRow(s, rel, opts)}</div>
   <div class="card-meta">
-    <button class="unlock-btn" data-hid="${esc(s.slug)}" title="${esc(HIDDEN_HINT)}">🔓 输入密码查看</button>
+    <button class="unlock-btn" title="${esc(HIDDEN_HINT)}">🔓 输入密码查看</button>
     ${s.dupTag && s.dupTag !== s.model ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
   </div>
 </article>`
@@ -661,7 +661,7 @@ function heroHtml(pinned, rel = '') {
         <span class="hero-meta">${s.hidden
           ? `${[s.model].filter(Boolean).map(esc).join(' · ')}${s.model ? ' · ' : ''}隐藏图集，输入密码后查看`
           : [s.model, `${s.imageCount} 张`, s.sizeText].filter(Boolean).map(esc).join(' · ')}</span>
-        ${s.hidden ? `<button class="unlock-btn hero-unlock" data-hid="${esc(s.slug)}">🔓 输入密码查看</button>` : ''}
+        ${s.hidden ? `<button class="unlock-btn hero-unlock">🔓 输入密码查看</button>` : ''}
       </span>`
     return s.hidden
       ? `
@@ -1636,30 +1636,27 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     // 原本没有 href 的入口（轮播大图 / 缩略条）补上地址
     if (el.tagName === 'A' && !el.getAttribute('href')) el.setAttribute('href', url + 'index.html');
   };
-  // 页面上所有锁着的封面一起解锁（不限制数量：一页可能有几十张隐藏卡，
-  // 之前只处理前 24 个，所以输完密码还留着一半是糊的）
+  // 页面上所有锁着的封面一起解锁（不限制数量、并发探测：
+  // 之前只处理前 24 个，一页 30 张时输完密码还留着一半是糊的）
   var unlockCards = function () {
     var pw = HN.pw(); if (!pw) return Promise.resolve(0);
-    var nodes = [].slice.call(document.querySelectorAll('[data-hid]:not(.unlocked)'));
+    // 注意别把卡片里的"输密码"按钮也算成一处（它自己带过 data-hid，重复处理会虚报数量）
+    var nodes = [].slice.call(document.querySelectorAll('[data-hid]:not(.unlocked):not(.unlock-btn)'));
     if (!nodes.length) return Promise.resolve(0);
-    var done = 0, bad = 0;
-    var step = function (i) {
-      if (i >= nodes.length) {
-        // 一个都没通过 → 密码多半被改过了，清掉本地记忆，回到锁定状态
-        if (!done && bad) HN.forget();
-        return Promise.resolve(done);
-      }
-      var batch = nodes.slice(i, i + 6);
-      return Promise.all(batch.map(function (el) {
-        var slug = el.getAttribute('data-hid'); if (!slug) return null;
-        return urlFor(slug, pw).then(function (url) {
-          return probe(url).then(function (ok) {
-            if (ok) { upgradeEl(el, url); done++; } else bad++;
-          });
-        }).catch(function () { bad++; });
-      })).then(function () { return step(i + 6); });
-    };
-    return step(0);
+    var doneSet = {}, bad = 0;
+    return Promise.all(nodes.map(function (el) {
+      var slug = el.getAttribute('data-hid'); if (!slug) return null;
+      return urlFor(slug, pw).then(function (url) {
+        return probe(url).then(function (ok) {
+          if (ok) { upgradeEl(el, url); doneSet[slug] = 1; } else bad++;
+        });
+      }).catch(function () { bad++; });
+    })).then(function () {
+      var done = Object.keys(doneSet).length;
+      // 一个都没通过 → 密码多半被改过了，清掉本地记忆，回到锁定状态
+      if (!done && bad) HN.forget();
+      return done;
+    });
   };
   // 客户端渲染出来的卡片（搜索/排序后重画）也要跟着解锁
   window.PN_unlockCards = unlockCards;
@@ -1681,10 +1678,10 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         }
         HN.save(pw);
         // 故意不跳详情页：就地解锁，用户自己点卡片进（这样能连着看下一套）
-        toast(document.querySelector('[data-hid]')
-          ? '✓ 密码正确，已解锁（本机记住）'
-          : '✓ 密码正确，已记住（回到列表即可查看）', true);
-        unlockCards();
+        unlockCards().then(function (n) {
+          toast(n ? '✓ 已解锁 ' + n + ' 套（本机记住密码）'
+                  : '✓ 密码正确，已记住（回到列表即可查看）', true);
+        });
       });
     }).catch(function () { toast('当前浏览器不支持（需要 HTTPS）', false); });
   };
@@ -1759,7 +1756,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       '</div>',
       '<div class="card-meta">',
       (s.dupTag && s.dupTag !== s.model ? '<span class="tag tag-model">' + esc(s.dupTag) + '</span>' : ''),
-      '<button class="unlock-btn" data-hid="' + esc(s.slug) + '">🔓 输入密码查看</button>',
+      '<button class="unlock-btn">🔓 输入密码查看</button>',
       '</div></article>',
     ].join('') : [
       '<article class="card">',
