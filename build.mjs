@@ -623,14 +623,6 @@ function profileQuoteHtml(pf = {}, extraClass = '') {
     + (socials.length ? `<p class="pf-social">${socials.join(' · ')}</p>` : '')
     + '</blockquote>'
 }
-/** 模特资料 → 侧栏卡片里的紧凑几行（没填就返回空串，卡片本身保持不变） */
-function profileLines(pf = {}) {
-  const { parts, socials } = profileBits(pf)
-  if (!parts.length && !socials.length) return ''
-  return (parts.length ? `<p class="sm-pf">${parts.join(' · ')}</p>` : '')
-    + (socials.length ? `<p class="sm-pf sm-social">${socials.join(' · ')}</p>` : '')
-}
-
 /** 单个模特的页面：资料引文 + 该模特的全部图集（按系列分组时给出系列芯片）*/
 function modelPage(name, list, rel = '../') {
   const pf = modelProfile(name)
@@ -745,14 +737,21 @@ function seriesIndexPage(bySeries, allSets) {
 
 function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}, moreSets = [], modelTotal = 0) {
   const rel = '../../'
-  // 模特资料（侧栏卡片里显示成几行小字；填没填都长同一张卡，差别只是这几行）
-  const pfLines = profileLines(s.profile || {})
-  const modelCard = (s.model || pfLines)
-    ? `<div class="side-model">
-        ${s.model ? `<a class="sm-name" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品">${esc(s.model)}<span class="dim">${modelTotal > 1 ? ` · ${modelTotal} 套图集` : ' · 全部作品'}</span></a>` : ''}
-        ${pfLines}
-      </div>`
-    : ''
+  // 模特行：封面（优先用该模特另一套的封面）+ 名字 + 套数 → 点进模特页
+  // 详情页不再放模特资料（出生/身高/风格…），资料统一只在模特页展示
+  const face = moreSets[0] || s
+  const modelRow = s.model ? `<a class="side-row" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品">
+        <span class="sr-art">${face.coverFile
+          ? `<img loading="lazy" src="${rel}set/${face.slug}/${face.coverThumb ? 'thumbs/' + face.coverThumb + verQ(face.thumbVer[face.coverThumb]) : face.coverFile}" alt="${esc(s.model)}">`
+          : '👤'}</span>
+        <span class="sr-body"><b>${esc(s.model)}</b><span class="sr-meta">${modelTotal > 1 ? `${modelTotal} 套图集` : '全部作品'}</span></span>
+        <span class="sr-go">›</span>
+      </a>` : ''
+  const seriesRow = s.series ? `<a class="side-row" href="${rel}series/${encodeURIComponent(s.series)}.html" title="查看「${esc(s.series)}」系列">
+        <span class="sr-art sr-ico">📚</span>
+        <span class="sr-body"><b>${esc(s.series)}</b><span class="sr-meta">系列全部</span></span>
+        <span class="sr-go">›</span>
+      </a>` : ''
 
   const previews = s.previews.length
     ? `<div class="previews" id="gallery">
@@ -836,8 +835,10 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
     </section>
     ${(s.model || s.series) ? `<section class="side-box">
       <h3 class="side-title">👤 模特与系列</h3>
-      ${modelCard}
-      ${s.series ? `<div class="side-links"><a class="side-link" href="${rel}series/${encodeURIComponent(s.series)}.html">${esc(s.series)} <span class="dim">系列全部</span></a></div>` : ''}
+      <div class="side-rows">
+        ${modelRow}
+        ${seriesRow}
+      </div>
       ${moreSets.length ? `<div class="side-sets">
         <p class="side-sub">${esc(s.model || s.series)} 的其他作品</p>
         ${moreSets.map(x => `<a class="side-set" href="${rel}set/${x.slug}/index.html" title="${esc(x.title)}">
@@ -1128,27 +1129,32 @@ img{max-width:100%;display:block}
   scrollbar-width:none;-ms-overflow-style:none}
 .detail-side.side-tall::-webkit-scrollbar{width:0;height:0;display:none}
 .side-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin-bottom:12px}
-.side-title{margin:0 0 8px;font-size:14px;font-weight:600;color:var(--accent2)}
+.side-title{margin:0 0 11px;padding-bottom:8px;font-size:14px;font-weight:600;color:var(--accent2);
+  border-bottom:1px solid var(--line)}   /* 标题下一道细线 → 三块模块的分区更清楚 */
 /* 下载 + 本套信息合并成一块：栏内滚动时它吸在顶部，下载按钮始终看得见 */
 .side-dl-box{position:sticky;top:0;z-index:2}
 .side-dl-wrap{margin:0 0 6px}
 .side-dl-box .side-dl{padding:7px 14px;font-size:13.5px}   /* 侧栏里的下载按钮紧凑一点 */
 /* 侧栏：模特的其他作品（缩略图 + 标题 + 日期/张数） */
 .side-sub{margin:9px 0 6px;font-size:12px;color:var(--dim);border-top:1px solid var(--line);padding-top:8px}
-.side-sub.first{margin-top:0;border-top:0;padding-top:0}
-/* 模特卡片：填没填资料都长同一张卡，第一行永远是「模特名 → 模特页」，
-   填过资料的只是下面多两行小字，不再出现两种完全不同的排版 */
-.side-model{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:7px 11px}
-.sm-name{display:block;font-size:13px;font-weight:600;color:var(--fg);text-decoration:none}
-.sm-name:hover{color:var(--accent)}
-.sm-name .dim{font-weight:400}
-.sm-pf{margin:4px 0 0;font-size:12px;line-height:1.6;color:var(--dim)}
-.sm-pf.sm-social a{color:var(--accent);text-decoration:none}
-.sm-pf.sm-social a:hover{text-decoration:underline}
+/* 模特行 / 系列行：同一种排版（封面 + 名字 + 说明 + ›），点进模特页/系列页。
+   详情页只留"去哪个模特、哪个系列"，模特资料本身只在模特页展示。 */
+.side-rows{display:flex;flex-direction:column;gap:6px}
+.side-row{display:flex;align-items:center;gap:9px;padding:5px 9px 5px 5px;border:1px solid var(--line);
+  border-radius:10px;background:var(--panel2);color:var(--fg);text-decoration:none;transition:.15s}
+.side-row:hover{border-color:var(--accent);background:var(--panel);transform:translateX(1px)}
+.side-row:hover .sr-go{color:var(--accent)}
+.sr-art{flex:0 0 38px;width:38px;height:50px;border-radius:7px;overflow:hidden;background:var(--panel);
+  display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1}
+.sr-art img{width:100%;height:100%;object-fit:cover;display:block}
+.sr-body{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
+.sr-body b{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-meta{font-size:11.5px;color:var(--dim)}
+.sr-go{flex:0 0 auto;color:var(--dim);font-size:17px;line-height:1;transition:color .15s}
 .side-sets{display:flex;flex-direction:column;gap:3px}
 .side-set{display:flex;gap:8px;align-items:center;padding:4px 5px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
 .side-set:hover{background:var(--panel2)}
-.ss-cover{flex:0 0 46px;width:46px;height:61px;border-radius:7px;overflow:hidden;background:var(--panel2)}
+.ss-cover{flex:0 0 38px;width:38px;height:50px;border-radius:7px;overflow:hidden;background:var(--panel2)}
 .ss-cover img{width:100%;height:100%;object-fit:cover;display:block}
 .ss-body{min-width:0;display:flex;flex-direction:column;gap:2px}
 .ss-body b{font-size:12.5px;line-height:1.4;font-weight:600;
@@ -1157,14 +1163,11 @@ img{max-width:100%;display:block}
 .side-box .btn{width:100%;justify-content:center;display:flex}
 .side-note{margin:6px 0 0;font-size:12px;line-height:1.6;color:var(--dim)}
 .side-note code{background:var(--panel2);padding:1px 6px;border-radius:5px;color:var(--fg)}
-.side-links{display:flex;flex-direction:column;gap:8px}
-.side-link{display:block;padding:7px 11px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);
-  color:var(--fg);text-decoration:none;font-size:13px;transition:.15s}
-.side-link:hover{border-color:var(--accent);color:var(--accent)}
 .side-info{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12.5px}
 .side-info dt{color:var(--dim);white-space:nowrap}
 .side-info dd{margin:0;word-break:break-word}
 .side-info code{background:var(--panel2);padding:1px 6px;border-radius:5px}
+/* 标签：pill 造型 + 计数徽标 */
 .side-tags{display:flex;flex-wrap:wrap;gap:5px}
 .side-tag{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;background:var(--panel2);
   border:1px solid var(--line);color:var(--dim);font-size:12px;text-decoration:none;transition:.15s}
@@ -1172,15 +1175,16 @@ img{max-width:100%;display:block}
 .side-tag:hover{color:var(--accent);border-color:var(--accent)}
 /* 视口不够高时自动收紧侧栏（只压间距/字号，不改结构），
    目标：整栏一屏放得下 → 不出现滚动条。1000px 以上才用宽松版。 */
-@media (min-width:1001px) and (max-height:1000px){
+@media (min-width:1001px) and (max-height:909px){
   .side-box{padding:10px 12px;margin-bottom:9px}
-  .side-title{margin-bottom:6px;font-size:13.5px}
+  .side-title{margin-bottom:9px;padding-bottom:6px;font-size:13.5px}
   .side-dl-box .side-dl{padding:5px 12px;font-size:13px}
   .side-note{font-size:11.5px;line-height:1.5}
   .side-sub{margin:6px 0 4px;padding-top:5px}
-  .side-model{padding:6px 10px}
-  .sm-pf{font-size:11.5px;line-height:1.55;margin-top:3px}
-  .ss-cover{flex-basis:36px;width:36px;height:47px}
+  .side-rows{gap:5px}
+  .side-row{padding:4px 8px 4px 4px}
+  .sr-art{flex-basis:34px;width:34px;height:44px;font-size:16px}
+  .ss-cover{flex-basis:34px;width:34px;height:44px}
   .side-set{padding:2px 4px}
   .side-sets{gap:2px}
   .ss-body b{font-size:12px}
@@ -1189,7 +1193,7 @@ img{max-width:100%;display:block}
   .side-tags + .side-note{display:none}      /* 标签框里的"查看全部标签"让位给一屏显示 */
 }
 /* 更矮的窗口：再砍掉"其他作品"的第 2 条和多余标签 */
-@media (min-width:1001px) and (max-height:788px){
+@media (min-width:1001px) and (max-height:758px){
   .side-set:nth-of-type(n+2){display:none}   /* 同栏 a 元素里的第 2 条起：只留 1 条作品 */
   .side-tag:nth-child(n+5){display:none}
   .side-tags + .side-note{display:none}      /* 标签框里的"查看全部标签"也让位 */
