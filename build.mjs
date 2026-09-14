@@ -1793,7 +1793,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       const renderList = (q) => {
         const all = applySort(INDEX.sets.filter(s => hits(s, q)));
         // 客户端分页：沿用同一套 Bootstrap 分页类名，搜索结果多时不再一屏铺完
-        const PER = 12;
+        const PER = 15;   // 与 setsPerPage 保持一致：桌面一行 5 张 → 15 张正好 3 行，最后一行不会是半空
         const pages = Math.max(1, Math.ceil(all.length / PER));
         if (curPage > pages) curPage = 1;
         const list = all.slice((curPage - 1) * PER, curPage * PER);
