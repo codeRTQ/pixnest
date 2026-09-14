@@ -1031,6 +1031,18 @@ img{max-width:100%;display:block}
 }
 .dim{color:var(--dim)}
 .empty{text-align:center;color:var(--dim);padding:40px 0}
+/* 搜索无结果的空状态：图标 + 说明 + 清除搜索/模特入口 + 热门标签 */
+.empty-box{display:flex;flex-direction:column;align-items:center;gap:10px;padding:34px 18px 38px;margin:6px 0 10px;
+  background:var(--panel);border:1px dashed var(--line);border-radius:14px;text-align:center}
+.empty-box[hidden]{display:none}
+.empty-icon{font-size:38px;line-height:1;opacity:.85}
+.empty-title{margin:0;color:var(--fg);font-size:16px;font-weight:600}
+.empty-hint{margin:0;color:var(--dim);font-size:13px}
+.empty-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:6px 0 2px}
+.empty-sub{margin:12px 0 0;color:var(--dim);font-size:12.5px}
+.empty-box .chips-cloud{justify-content:center;margin-top:2px}
+.empty-box .cloud-chip{cursor:pointer;font-family:inherit}
+#empty{background:none;border:0;padding:0}
 .breadcrumb{display:flex;gap:8px;color:var(--dim);font-size:13px;margin:22px 0 14px;flex-wrap:wrap}
 .admin-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:rgba(91,140,255,.08);border:1px solid rgba(91,140,255,.35);border-radius:10px;padding:10px 14px;margin:18px 0 0}
 .admin-bar[hidden]{display:none}
@@ -1335,6 +1347,29 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         else if (v === 'title-asc') arr.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'zh-CN'));
         return arr;
       };
+      // 搜不到结果时的引导：清除搜索 + 模特入口 + 热门标签（原来只有一行裸文字）
+      const emptyHtml = (q) => {
+        const tagCount = {}, modelCount = {};
+        INDEX.sets.forEach(s => {
+          (s.tags || []).forEach(t => { tagCount[t] = (tagCount[t] || 0) + 1; });
+          if (s.model) modelCount[s.model] = (modelCount[s.model] || 0) + 1;
+        });
+        const topTags = Object.entries(tagCount).sort((a, b) => b[1] - a[1]).slice(0, 12);
+        const topModels = Object.entries(modelCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
+        return '<div class="empty-box">'
+          + '<div class="empty-icon">🔍</div>'
+          + '<p class="empty-title">没有找到与「' + esc(q) + '」匹配的图集</p>'
+          + '<p class="empty-hint">换个关键词试试，或者从下面这些入口继续逛：</p>'
+          + '<div class="empty-actions">'
+          + '<button class="btn btn-primary sm" id="emptyClear">清除搜索，看全部 ' + INDEX.count + ' 套</button>'
+          + topModels.map(([m, n]) => '<a class="btn ghost sm" href="' + base + 'model/' + encodeURIComponent(m) + '.html">👤 ' + esc(m) + '（' + n + ' 套）</a>').join('')
+          + '<a class="btn ghost sm" href="' + base + 'collections.html">🏷 全部标签与系列</a>'
+          + '</div>'
+          + '<p class="empty-sub">热门标签（点一下直接搜）</p>'
+          + '<div class="chips-cloud" id="emptyTags">'
+          + topTags.map(([t, n]) => '<button class="cloud-chip" data-tag="' + esc(t) + '">#' + esc(t) + '<span>' + n + '</span></button>').join('')
+          + '</div></div>';
+      };
       const renderList = (q) => {
         const all = applySort(INDEX.sets.filter(s => hits(s, q)));
         // 客户端分页：沿用同一套 Bootstrap 分页类名，搜索结果多时不再一屏铺完
@@ -1371,7 +1406,27 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
             if (g) window.scrollTo({ top: g.getBoundingClientRect().top + window.scrollY - 90, behavior: 'smooth' });
           }));
         }
-        if (empty) empty.hidden = all.length !== 0;
+        if (empty) {
+          empty.hidden = all.length !== 0;
+          empty.innerHTML = all.length === 0 ? emptyHtml(q) : '没有匹配的图集';
+          if (all.length === 0) {
+            // 空状态里的交互：清除搜索 / 点热门标签直接搜
+            const clr = document.getElementById('emptyClear');
+            if (clr) clr.addEventListener('click', () => {
+              if (input) input.value = '';
+              curPage = 1;
+              renderList('');
+              history.replaceState(null, '', base + 'index.html');
+            });
+            empty.querySelectorAll('#emptyTags button[data-tag]').forEach(b => b.addEventListener('click', () => {
+              const t = b.dataset.tag;
+              if (input) input.value = t;
+              curPage = 1;
+              renderList(t.toLowerCase());
+              history.replaceState(null, '', base + 'index.html?q=' + encodeURIComponent(t));
+            }));
+          }
+        }
       };
       // 快捷筛选芯片：热门系列 + 模特
       if (chips) {
