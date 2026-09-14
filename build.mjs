@@ -629,25 +629,38 @@ function pagerHtml(page, totalPages, hrefOf) {
 }
 
 /** 置顶推荐轮播（列表页顶部；没有置顶图集时返回空串，页面自动退回标题样式）
- *  布局：左边 16:9 轮播舞台 + 右边置顶清单（点清单可切换，不用等自动播放） */
+ *  布局：左边 16:9 轮播舞台 + 右边置顶清单（点清单可切换，不用等自动播放）
+ *  隐藏图集也能置顶：轮播里只显示模糊封面 + 🔒，点击要输密码（解锁后自动换成真实封面） */
 function heroHtml(pinned, rel = '') {
-  // 隐藏套图不参与首页轮播（避免把模糊图放到最显眼的位置；想让它出现就先取消隐藏）
-  pinned = pinned.filter(s => !s.hidden)
   if (!pinned.length) return ''
-  // 轮播大图：后台裁过 Banner 就用 Banner（默认仍用封面）
-  const pic = (s) => s.bannerThumb ? { f: 'thumbs/' + s.bannerThumb, v: s.thumbVer[s.bannerThumb], banner: true }
-    : (s.coverThumb ? { f: 'thumbs/' + s.coverThumb, v: s.thumbVer[s.coverThumb], banner: false }
-      : (s.coverFile ? { f: s.coverFile, v: '', banner: false } : null))
+  // 轮播大图：后台裁过 Banner 就用 Banner（默认仍用封面）；隐藏图集用公开的模糊小图
+  const pic = (s) => s.hidden
+    ? (s.blurThumb ? { f: `../blur/${encodeURIComponent(s.slug)}.webp`, v: '', banner: false, locked: true } : null)
+    : (s.bannerThumb ? { f: 'thumbs/' + s.bannerThumb, v: s.thumbVer[s.bannerThumb], banner: true }
+      : (s.coverThumb ? { f: 'thumbs/' + s.coverThumb, v: s.thumbVer[s.coverThumb], banner: false }
+        : (s.coverFile ? { f: s.coverFile, v: '', banner: false } : null)))
+  // 解锁后要换成哪张图（隐藏图集用它的 Banner/封面）
+  const unlockCover = (s) => s.bannerThumb || s.coverThumb || ''
   const slides = pinned.map((s, i) => {
     const p = pic(s)
-    return `
-    <a class="hero-slide${i ? '' : ' on'}" href="${rel}set/${s.slug}/index.html" aria-label="${esc(s.title)}">
-      ${p ? `<img class="${p.banner ? 'is-banner' : ''}" src="${rel}set/${s.slug}/${p.f}${verQ(p.v)}" alt="${esc(s.title)}"${i ? ' loading="lazy"' : ''}>` : ''}
+    const img = p ? `<img class="${p.locked ? 'blurred' : p.banner ? 'is-banner' : ''}" src="${s.hidden ? `${rel}blur/${encodeURIComponent(s.slug)}.webp` : `${rel}set/${s.slug}/${p.f}${verQ(p.v)}`}" alt="${esc(s.title)}"${i ? ' loading="lazy"' : ''}>` : ''
+    const info = `
       <span class="hero-info">
-        <span class="hero-badge">📌 置顶推荐</span>
+        <span class="hero-badge">${s.hidden ? '🔒 置顶 · 隐藏' : '📌 置顶推荐'}</span>
         <h2>${esc(s.title)}</h2>
-        <span class="hero-meta">${[s.model, `${s.imageCount} 张`, s.sizeText].filter(Boolean).map(esc).join(' · ')}</span>
-      </span>
+        <span class="hero-meta">${s.hidden
+          ? `${[s.model].filter(Boolean).map(esc).join(' · ')}${s.model ? ' · ' : ''}隐藏图集，输入密码后查看`
+          : [s.model, `${s.imageCount} 张`, s.sizeText].filter(Boolean).map(esc).join(' · ')}</span>
+        ${s.hidden ? `<button class="unlock-btn hero-unlock" data-hid="${esc(s.slug)}">🔓 输入密码查看</button>` : ''}
+      </span>`
+    return s.hidden
+      ? `
+    <div class="hero-slide locked${i ? '' : ' on'}" data-hid="${esc(s.slug)}"${unlockCover(s) ? ` data-cover="${esc(unlockCover(s))}"` : ''} aria-label="${esc(s.title)}（隐藏）">
+      ${img}${info}
+    </div>`
+      : `
+    <a class="hero-slide${i ? '' : ' on'}" href="${rel}set/${s.slug}/index.html" aria-label="${esc(s.title)}">
+      ${img}${info}
     </a>`
   }).join('')
   const multi = pinned.length > 1
@@ -660,9 +673,15 @@ function heroHtml(pinned, rel = '') {
   const list = multi ? `<aside class="hero-list">
       <div class="hero-list-inner">
         <h3>📌 置顶推荐（${pinned.length}）</h3>
-        ${pinned.map((s, i) => `<a class="hero-item${i ? '' : ' on'}" href="${rel}set/${s.slug}/index.html" data-i="${i}">
-          ${s.coverFile ? `<img src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="" loading="lazy">` : ''}
-          <span class="hero-item-text"><b>${esc(s.title)}</b><span>${[s.model, `${s.imageCount} 张`, s.sizeText].filter(Boolean).map(esc).join(' · ')}</span></span>
+        ${pinned.map((s, i) => `<a class="hero-item${i ? '' : ' on'}${s.hidden ? ' is-hidden' : ''}"${s.hidden
+          ? ` data-hid="${esc(s.slug)}"${unlockCover(s) ? ` data-cover="${esc(unlockCover(s))}"` : ''}`
+          : ` href="${rel}set/${s.slug}/index.html"`} data-i="${i}">
+          ${s.hidden
+            ? (s.blurThumb ? `<img class="blurred" src="${rel}blur/${encodeURIComponent(s.slug)}.webp" alt="" loading="lazy">` : '')
+            : (s.coverFile ? `<img src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="" loading="lazy">` : '')}
+          <span class="hero-item-text"><b>${s.hidden ? '🔒 ' : ''}${esc(s.title)}</b><span>${s.hidden
+            ? '隐藏图集 · 输入密码查看'
+            : [s.model, `${s.imageCount} 张`, s.sizeText].filter(Boolean).map(esc).join(' · ')}</span></span>
         </a>`).join('')}
       </div>
     </aside>` : ''
@@ -1189,6 +1208,16 @@ img{max-width:100%;display:block}
 .hero-track{position:relative;aspect-ratio:${config.heroRatio || '21/9'};max-height:${config.heroMaxHeight || 380}px;min-height:150px}
 .hero-slide{position:absolute;inset:0;display:block;opacity:0;transition:opacity .55s ease;text-decoration:none;color:#fff;pointer-events:none}
 .hero-slide.on{opacity:1;pointer-events:auto}
+/* 隐藏图集置顶：轮播里只给模糊封面 + 🔒，点按钮输密码 */
+.hero-slide.locked{cursor:default}
+.hero-slide.locked .hero-info{gap:10px}
+.hero-unlock{align-self:flex-start;font:inherit;font-size:13px;padding:7px 16px;border-radius:999px;cursor:pointer;
+  border:1px solid rgba(255,180,84,.55);background:rgba(255,180,84,.92);color:#1a1206;font-weight:600}
+.hero-unlock:hover{filter:brightness(1.08)}
+.hero-item.is-hidden{cursor:default}
+.hero-item.is-hidden img{filter:blur(6px) saturate(.8)}
+.hero-item.is-hidden.unlocked{cursor:pointer}
+.hero-item.is-hidden.unlocked img{filter:none}
 .hero-slide img{width:100%;height:100%;object-fit:cover;object-position:center 22%;display:block}
 .hero-slide img.is-banner{object-position:center center}   /* 自己裁的 Banner 用居中，别再偏向面部 */
 /* 图片上的压暗渐变：只压下半部分（标题在底部），上半部分留给画面 ——
@@ -1581,6 +1610,8 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
           if (btn) btn.textContent = '🔓 查看这套图';
           var a = el.querySelector('a.card-link');
           if (!a && el.tagName === 'A' && !el.getAttribute('href')) el.setAttribute('href', url);
+          if (!a && el.tagName === 'A' && el.classList.contains('hero-item')) el.setAttribute('href', url);
+          if (el.classList.contains('hero-slide')) { var hb = el.querySelector('.hero-badge'); if (hb) hb.textContent = '📌 置顶推荐'; }
         });
       });
     });
@@ -2308,7 +2339,8 @@ function build() {
     if (pub) MODEL_FACE[m] = setCoverUrl(pub, '').replace(/^\//, '')
   }
   // 置顶推荐（列表页顶部轮播）：按 pinOrder 升序，没填的排在后面并按日期
-  const pinnedSets = sets.filter(s => s.pinned && !s.hidden)
+  // 置顶推荐也包含隐藏图集：它在轮播里显示模糊封面 + 🔒，点它要输密码
+  const pinnedSets = sets.filter(s => s.pinned)
     .sort((a, b) => (a.pinOrder || 9999) - (b.pinOrder || 9999) || cmpDateDesc(a, b))
   if (!sets.length) console.warn('! sets/ 下没有有效图集（每个图集目录需含 meta.json）')
   // ★ 先把样式/脚本落盘：后面复制缩略图要花几十秒，万一构建被打断（关掉后台、重启进程等），
