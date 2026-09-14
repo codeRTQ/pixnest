@@ -535,7 +535,7 @@ ${ADULT_GATE}
 </body>
 </html>`
 
-/** 卡片上的「模特行」：头像 + 模特名 + 日期（参照同类站的展示；没填模特时只显示日期） */
+/** 卡片上的「模特行」：头像 + 名字 · 日期（名字与日期都是浅灰、挨在一起用圆点分隔） */
 function cardModelRow(s, rel = '', opts = {}) {
   const face = !opts.noModel && s.model ? MODEL_FACE[s.model] : ''
   const avatar = face
@@ -544,8 +544,11 @@ function cardModelRow(s, rel = '', opts = {}) {
   const name = (!opts.noModel && s.model)
     ? `<a class="card-model-name" href="${rel}model/${encodeURIComponent(s.model)}.html">${esc(s.model)}</a><span class="sep">·</span>`
     : ''
-  return `${avatar}${name}<time datetime="${esc(s.date)}">${esc(s.date)}</time>`
+  return `${avatar}${name}<time datetime="${esc(s.date)}">${esc(slashDate(s.date))}</time>`
 }
+
+/** 日期显示成 2026/09/13 这种斜杠格式（datetime 属性仍用标准 ISO 写法） */
+const slashDate = (d) => String(d || '').replace(/-/g, '/')
 
 const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   // 隐藏但没配密码（构建时算不出私有地址）→ 只给一张糊图，没有任何入口
@@ -1105,7 +1108,7 @@ img{max-width:100%;display:block}
 .page-head{margin:28px 0 18px}
 .page-head h1{margin:0;font-size:22px}
 .page-head .sub{color:var(--dim);margin:4px 0 0;font-size:13px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px}   /* 桌面一行 5 张 */
 /* 卡片：选中/悬停不出现彩色描边，改成"图片轻微放大 + 轻微抬起投影" */
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
   transition:transform .2s ease,box-shadow .2s ease}
@@ -1115,11 +1118,12 @@ img{max-width:100%;display:block}
 .card:hover .card-cover img{transform:scale(1.06)}
 .card:hover .card-cover img.blurred{transform:scale(1.22)}   /* 隐藏卡的糊图：放大但保持模糊 */
 .no-cover{display:flex;align-items:center;justify-content:center;height:100%;color:var(--dim)}
-.badge{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.65);color:#fff;font-size:12px;padding:2px 8px;border-radius:999px}
-.badge-size{left:auto;right:8px;background:rgba(91,140,255,.85)}
-.card-title{margin:0;padding:12px 12px 6px;font-size:14px;line-height:1.5;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.card-title .mavatar{margin-right:6px;margin-top:-3px}
-.card-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:0 12px 12px;font-size:12px;color:var(--dim)}
+.badge{position:absolute;top:6px;left:6px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;padding:1px 7px;border-radius:999px}
+.badge-size{left:auto;right:6px;background:rgba(91,140,255,.85)}
+.card-title{margin:0;padding:11px 11px 6px;font-size:13.5px;line-height:1.45;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-title .mavatar{margin-right:5px;margin-top:-3px}
+.card-meta{display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding:0 11px 11px;font-size:11.5px;color:var(--dim)}
+.card-meta .tag{font-size:11px;padding:1px 7px}
 /* 日期固定单独占一行右对齐：标签多少不一，若跟着标签排会出现"有的同行、有的换行" */
 .card-meta time{flex:1 0 100%;margin:0;text-align:right}
 /* 模特卡：资料标签区固定成"一行标签"的高度（24.4px = 12px 标签 + 内边距 + 边框），
@@ -1233,17 +1237,17 @@ img{max-width:100%;display:block}
   .hero-dots{left:14px;bottom:14px}
 }
 .badge-pin{left:8px;top:auto;bottom:8px;background:rgba(255,180,84,.92);color:#1a1206;font-weight:600}
-/* 模特行：头像 + 模特名 + 日期（文字平时灰一点，鼠标移上去变亮；不弹提示文字、不描蓝框） */
-.card-model{display:flex;align-items:center;gap:7px;padding:0 12px 8px;font-size:12px;color:var(--dim);
+/* 模特行：头像 + 名字 · 日期（名字和日期同一种浅灰，挨在一起用圆点分隔；不弹提示、不描蓝框） */
+.card-model{display:flex;align-items:center;gap:6px;padding:0 11px 8px;font-size:11.5px;color:var(--dim);
   white-space:nowrap;overflow:hidden}
-.card-avatar{flex:0 0 26px;width:26px;height:26px;border-radius:50%;overflow:hidden;display:block;
+.card-avatar{flex:0 0 24px;width:24px;height:24px;border-radius:50%;overflow:hidden;display:block;
   background:var(--panel2);border:0;box-shadow:0 0 0 1px rgba(255,255,255,.10);transition:transform .2s ease}
 html[data-theme="light"] .card-avatar{box-shadow:0 0 0 1px rgba(0,0,0,.07)}
 .card-avatar img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .2s ease}
 .card-avatar:hover{transform:scale(1.12)}   /* 只放大，不变色 */
-.card-model-name{color:var(--dim);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;max-width:45%;
+.card-model-name{color:var(--dim);font-weight:500;text-decoration:none;overflow:hidden;text-overflow:ellipsis;max-width:48%;
   transition:color .18s ease}
-.card-model time{margin-left:auto;transition:color .18s ease}
+.card-model time{margin:0;transition:color .18s ease}
 .card-model:hover .card-model-name,.card-model:hover time{color:var(--fg)}   /* 悬停/选中：文字变亮 */
 /* 鼠标点过的链接不要再出现浏览器默认的蓝色聚焦框（键盘 Tab 仍保留可见焦点） */
 a:focus,button:focus{outline:none}
@@ -1659,7 +1663,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       const href = s.model ? base + 'model/' + encodeURIComponent(s.model) + '.html' : '';
       return (face ? '<a class="card-avatar" href="' + href + '"><img loading="lazy" src="' + base + face + '" alt="' + esc(s.model) + '"></a>' : '')
         + (s.model ? '<a class="card-model-name" href="' + href + '">' + esc(s.model) + '</a><span class="sep">·</span>' : '')
-        + '<time>' + esc(s.date) + '</time>';
+        + '<time>' + esc(String(s.date || '').replace(/-/g, '/')) + '</time>';
     };
     const cardHtml = (s) => s.locked ? [
       '<article class="card card-locked" data-hid="' + esc(s.slug) + '" data-cover="cover.webp">',
