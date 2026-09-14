@@ -1835,6 +1835,217 @@ def match_set(keyword, sets):
     return None, '没找到匹配的图集'
 
 
+# ───────────── 批量重命名（标题清洗 + 可选的目录改名）─────────────
+def apply_title_rules(title, rules=None):
+    """按规则算出一个新标题（只算不写，供预览）。
+
+    规则（都可选，按顺序应用）：
+      no    去掉开头的 NO 编号（NO.012 / no-12 / NO 12）
+      num   去掉开头的纯数字编号（01 / 第 03 期 / 2024-01）
+      tail  去掉结尾的 [28P-447MB]、【…】、（…）（可连续去掉多个）
+      find/re 查找替换（re=true 时按正则）
+      prefix/suffix  加前缀 / 后缀
+      space 合并多余空格并去首尾（默认开）
+    """
+    rules = rules or {}
+    t = str(title or '')
+    if rules.get('no'):
+        t = re.sub(r'^\s*(?:no|No|NO|ＮＯ)\s*[.\-_、]?\s*\d{1,4}\s*', '', t)
+    if rules.get('num'):
+        t = re.sub(r'^\s*(?:第\s*)?\d{1,4}\s*(?:期|[.\-_、])?\s*', '', t)
+    if rules.get('tail'):
+        for _ in range(4):
+            new = re.sub(r'\s*[\[【（(][^\]】）)]*[\]】）)]\s*$', '', t)
+            if new == t:
+                break
+            t = new
+    if rules.get('find'):
+        if rules.get('re'):
+            try:
+                t = re.sub(rules['find'], rules.get('rep', ''), t)
+            except re.error:
+                pass
+        else:
+            t = t.replace(rules['find'], rules.get('rep', ''))
+    if rules.get('prefix'):
+        t = rules['prefix'] + t
+    if rules.get('suffix'):
+        t = t + rules['suffix']
+    if rules.get('space', True):
+        t = re.sub(r'[ \t\u3000]{2,}', ' ', t).strip()
+    return t.strip()
+
+
+def batch_rename(items, rename_dirs=False):
+    """按预览结果批量改标题（items: [{slug, title}]）；rename_dirs=True 时连目录一起改名。
+
+    返回 (改了几套, [跳过原因], [目录改名记录], [新的 slug 映射])
+    """
+    changed, skipped, moves, slugmap = 0, [], [], []
+    for it in (items or []):
+        slug = str(it.get('slug') or '').strip()
+        new = str(it.get('title') or '').strip()
+        d = os.path.join(SETS_DIR, slug)
+        if not slug or not os.path.isdir(d):
+            skipped.append(f'{slug or "(空)"}: 图集不存在')
+            continue
+        if not new:
+            skipped.append(f'{slug}: 新标题是空的，已跳过')
+            continue
+        meta = read_meta(d)
+        old = str(meta.get('title') or '').strip()
+        meta['title'] = new
+        meta.pop('displayTitle', None)     # 清掉缓存的展示标题，列表按新标题重建
+        save_meta(d, meta)
+        if new != old:
+            changed += 1
+        if rename_dirs:
+            want = f'{meta.get("date") or date.today().isoformat()}-{slugify(new)}'
+            new_slug = unique_slug(want, meta.get('model'), meta.get('series'))
+            if new_slug != slug:
+                try:
+                    os.rename(d, os.path.join(SETS_DIR, new_slug))
+                    moves.append(f'{slug} → {new_slug}')
+                    slugmap.append((slug, new_slug))
+                    slug = new_slug
+                except Exception as e:  # noqa
+                    skipped.append(f'{slug}: 目录改名失败（{e}）')
+    return changed, skipped, moves, slugmap
+
+
+def rename_page(msg=''):
+    """批量重命名页：选范围 → 选规则 → 预览（可直接改）→ 应用"""
+    sets = list_sets()
+    models = sorted({(s['meta'].get('model') or '').strip() for s in sets if (s['meta'].get('model') or '').strip()})
+    series = sorted({(s['meta'].get('series') or '').strip() for s in sets if (s['meta'].get('series') or '').strip()})
+    data = [{'slug': s['slug'], 'title': s['meta'].get('title') or s['slug'],
+             'model': (s['meta'].get('model') or '').strip(), 'series': (s['meta'].get('series') or '').strip(),
+             'hidden': bool(s['meta'].get('hidden'))} for s in sets]
+    return page('批量重命名', f"""
+<a class="btn ghost sm" href="/">← 返回后台</a>
+<div class="panel">
+  <h2>✏️ 批量重命名（标题清洗）</h2>
+  <p class="sub">选范围 → 勾规则 → 点「预览」→ 表格里可以直接改 → 点「应用」。<br>
+    只改<b>标题</b>（站点上显示的文字）；目录名默认不动，所以隐藏套图的分享链接不会失效。</p>
+  <div class="grid2" style="margin-top:10px">
+    <div>
+      <label>处理范围</label>
+      <select id="rScope" onchange="scopeChanged()">
+        <option value="picked">首页勾选的图集</option>
+        <option value="model">某个模特的全部作品</option>
+        <option value="series">某个系列的全部作品</option>
+        <option value="all">全部图集（{len(data)} 套）</option>
+      </select>
+      <select id="rModel" hidden>{''.join(f'<option value="{esc_attr(m)}">{esc_attr(m)}</option>' for m in models)}</select>
+      <select id="rSeries" hidden>{''.join(f'<option value="{esc_attr(x)}">{esc_attr(x)}</option>' for x in series)}</select>
+      <span class="sub" id="rCount" style="margin-left:8px"></span>
+    </div>
+    <div>
+      <label>规则（按顺序应用）</label>
+      <label style="display:block"><input type="checkbox" id="rNo" checked style="width:auto"> 去掉开头的 NO 编号（NO.012 / no-12）</label>
+      <label style="display:block"><input type="checkbox" id="rNum" style="width:auto"> 去掉开头的纯数字编号（01 / 第 03 期）</label>
+      <label style="display:block"><input type="checkbox" id="rTail" checked style="width:auto"> 去掉结尾的 [28P-447MB]、【…】、（…）</label>
+      <label style="display:block"><input type="checkbox" id="rSpace" checked style="width:auto"> 合并多余空格、去首尾空格</label>
+    </div>
+    <div>
+      <label>查找替换（可选）</label>
+      <input type="text" id="rFind" placeholder="要替换的文字" style="max-width:200px">
+      <span class="dim">→</span>
+      <input type="text" id="rRep" placeholder="替换成（可留空＝删掉）" style="max-width:200px">
+      <label style="display:inline-flex;align-items:center;gap:6px;margin-left:6px">
+        <input type="checkbox" id="rRe" style="width:auto"> 正则
+      </label>
+    </div>
+    <div>
+      <label>加前缀 / 后缀（可选）</label>
+      <input type="text" id="rPre" placeholder="前缀" style="max-width:140px">
+      <input type="text" id="rSuf" placeholder="后缀" style="max-width:140px">
+    </div>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <label style="display:flex;align-items:center;gap:8px;margin:0">
+      <input type="checkbox" id="rDir" style="width:auto"> 同时把目录名改成「日期-新标题」
+      <span class="sub" style="margin:0">（⚠️ URL 会变：隐藏套图的分享链接会失效，需要重新复制）</span>
+    </label>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <button class="btn" onclick="renamePreview()">① 预览新标题</button>
+    <button class="btn ghost" onclick="renameApply()">② 应用</button>
+    <span class="sub" id="rState" style="margin:0"></span>
+  </div>
+  {f'<p class="sub" style="margin-top:8px">{esc(msg)}</p>' if msg else ''}
+</div>
+<div id="rTable"></div>
+<script>window.ALL_SETS={json.dumps(data, ensure_ascii=False)};</script>
+""", extra_js="""
+function scopeSets(){
+  const scope=document.getElementById('rScope').value;
+  const all=window.ALL_SETS||[];
+  if(scope==='all')return all;
+  if(scope==='model'){const m=document.getElementById('rModel').value;return all.filter(s=>s.model===m)}
+  if(scope==='series'){const x=document.getElementById('rSeries').value;return all.filter(s=>s.series===x)}
+  const st=pickedStore();
+  return all.filter(s=>st.has(s.slug));
+}
+function scopeChanged(){
+  const scope=document.getElementById('rScope').value;
+  document.getElementById('rModel').hidden = scope!=='model';
+  document.getElementById('rSeries').hidden = scope!=='series';
+  const n=scopeSets().length;
+  const el=document.getElementById('rCount');
+  el.textContent = scope==='picked' ? ('已勾选 '+n+' 套'+(n?'':'（去首页勾选，或换成本页其它范围）')) : ('共 '+n+' 套');
+}
+document.getElementById('rModel').onchange=scopeChanged;
+document.getElementById('rSeries').onchange=scopeChanged;
+window.addEventListener('DOMContentLoaded',scopeChanged);
+function renameRules(){
+  return {
+    no:document.getElementById('rNo').checked, num:document.getElementById('rNum').checked,
+    tail:document.getElementById('rTail').checked, space:document.getElementById('rSpace').checked,
+    find:document.getElementById('rFind').value, rep:document.getElementById('rRep').value,
+    re:document.getElementById('rRe').checked,
+    prefix:document.getElementById('rPre').value, suffix:document.getElementById('rSuf').value
+  };
+}
+function renamePreview(){
+  const slugs=scopeSets().map(s=>s.slug);
+  if(!slugs.length){toast('这个范围里没有图集',false);return}
+  document.getElementById('rState').textContent='正在算…';
+  fetch('/rename-preview',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({slugs:slugs,rules:renameRules()})})
+    .then(r=>r.json()).then(d=>{
+      const rows=(d.rows||[]).map(function(r){
+        const chg=r.new!==r.old;
+        return '<tr'+(chg?'':' class="dim"')+'><td><code>'+escHtml(r.slug)+'</code>'+(r.hidden?' 🔒':'')+'</td>'
+          +'<td>'+escHtml(r.old)+'</td>'
+          +'<td><input type="text" data-slug="'+escHtml(r.slug)+'" value="'+escHtml(r.new)+'" style="min-width:280px"></td></tr>';
+      }).join('');
+      const changed=(d.rows||[]).filter(r=>r.new!==r.old).length;
+      document.getElementById('rTable').innerHTML =
+        '<div class="panel"><h2>预览（'+changed+' / '+(d.rows||[]).length+' 套会被改）</h2>'
+        +'<p class="sub">表格里可以直接手改；不想要的把它改回原样即可。改完点上面的「② 应用」。</p>'
+        +'<table class="tagtable"><tr><th>目录</th><th>现在的标题</th><th>改成</th></tr>'+rows+'</table></div>';
+      document.getElementById('rState').textContent='预览完成，确认后点「② 应用」';
+      document.getElementById('rTable').scrollIntoView({behavior:'smooth',block:'start'});
+    })
+    .catch(e=>{document.getElementById('rState').textContent='预览失败：'+e;toast('预览失败：'+e,false)});
+}
+function escHtml(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function renameApply(){
+  const inputs=[...document.querySelectorAll('#rTable input[data-slug]')];
+  if(!inputs.length){toast('先点「① 预览新标题」',false);return}
+  const items=inputs.map(i=>({slug:i.dataset.slug,title:i.value.trim()}));
+  const changed=items.filter(i=>i.title).length;
+  const dirs=document.getElementById('rDir').checked;
+  if(!confirm('应用 '+changed+' 套的新标题'+(dirs?'，并同时改目录名（URL 会变）':'')+'？'))return;
+  document.getElementById('rState').textContent='正在应用并重建…';
+  fetch('/rename-apply',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({items:items,renameDirs:dirs})})
+    .then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),1800)})
+    .catch(e=>{document.getElementById('rState').textContent='失败：'+e;toast('失败：'+e,false)});
+}
+""")
+
 def batch_page():
     """批量导入多个文件夹：每个子文件夹 = 一套图集，标题默认用文件夹名"""
     return page('批量导入文件夹', f"""
@@ -2783,6 +2994,7 @@ def home_page(msg='', q='', page_no=1, per=24, sort='date-desc', view='card'):
     <input type="text" id="bulkTags" placeholder="批量追加标签（逗号分隔）">
     <button class="btn ghost sm" onclick="bulkAddTags()">追加标签</button>
     <button class="btn ghost sm" onclick="bulkAutoTag()">🤖 批量打标</button>
+    <a class="btn ghost sm" href="/rename" title="只处理已勾选的（勾选框右上角）">✏️ 批量重命名选中</a>
     <button class="btn danger sm" onclick="bulkDelete()">删除选中</button>
     <button class="btn ghost sm" onclick="clearPick()">清空选择</button>
   </div>
@@ -2796,6 +3008,7 @@ def home_page(msg='', q='', page_no=1, per=24, sort='date-desc', view='card'):
   <button class="btn ghost" onclick="healthCheck()">🩺 站点体检</button>
   <button class="btn ghost" onclick="purgeTrash()">🗑 清空回收站</button>
   <a class="btn ghost" href="/tags">🏷 标签管理</a>
+  <a class="btn ghost" href="/rename">✏️ 批量重命名</a>
   <a class="btn ghost" href="/links">🔗 批量导入网盘链接</a>
   <a class="btn ghost" href="/batch">📚 批量导入文件夹（多套）</a>
   <a class="btn ghost" href="/models">👤 模特资料（按模特统一维护）</a>
@@ -3172,6 +3385,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._html(tags_page())
         if u.path == '/links':
             return self._html(links_page())
+        if u.path == '/rename':
+            return self._html(rename_page())
         if u.path == '/batch':
             return self._html(batch_page())
         if u.path == '/models':
@@ -3433,6 +3648,34 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             ok, out = rebuild()
             return self._text(f'✓ 封面已按自定义区域裁剪（{x2 - x1}×{y2 - y1} → {COVER_W}×{COVER_H}）\n重建：' + ('成功' if ok else '失败'))
+        if u.path == '/rename-preview':
+            d = self._json_body()
+            slugs = [str(x) for x in (d.get('slugs') or [])]
+            rules = d.get('rules') or {}
+            rows = []
+            for s in list_sets():
+                if slugs and s['slug'] not in slugs:
+                    continue
+                old = str(s['meta'].get('title') or s['slug'])
+                rows.append({'slug': s['slug'], 'old': old, 'new': apply_title_rules(old, rules),
+                             'hidden': bool(s['meta'].get('hidden')),
+                             'model': (s['meta'].get('model') or ''), 'series': (s['meta'].get('series') or '')})
+            return self._json({'count': len(rows), 'rows': rows})
+        if u.path == '/rename-apply':
+            d = self._json_body()
+            items = d.get('items') or []
+            if not items:
+                return self._text('没有要改的内容（先点「预览」）', 400)
+            changed, skipped, moves, slugmap = batch_rename(items, bool(d.get('renameDirs')))
+            ok, out = rebuild()
+            msg = [f'✓ 已更新 {changed} 套标题']
+            if moves:
+                msg.append(f'  目录改名 {len(moves)} 个：' + '；'.join(moves[:5]) + ('…' if len(moves) > 5 else ''))
+                msg.append('  ⚠️ 目录变了 → 隐藏套图的分享链接需要重新复制（编辑页里能看新地址）')
+            if skipped:
+                msg.append(f'  跳过 {len(skipped)} 套：' + '；'.join(skipped[:5]))
+            msg.append('重建：' + ('成功' if ok else '失败'))
+            return self._text('\n'.join(msg))
         if u.path == '/cropbanner':
             d = self._json_body()
             slug, img = d.get('slug', ''), d.get('img', '')
