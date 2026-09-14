@@ -795,15 +795,26 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
     hasDlTarget && s.shareCode ? `提取码 <code>${esc(s.shareCode)}</code>` : '',
     hasDlTarget && s.password ? `解压密码 <code>${esc(s.password)}</code>` : '',
   ].filter(Boolean)
-  const hotTags = Object.entries(tagCounts || {}).sort((a, b) => b[1].length - a[1].length).slice(0, 18)
+  // 侧栏只放最热的 10 个标签（列表页/合集页有完整标签云）
+  const hotTags = Object.entries(tagCounts || {}).sort((a, b) => b[1].length - a[1].length).slice(0, 10)
   const sideBlock = `
   <aside class="detail-side">
-    <section class="side-box">
+    <section class="side-box side-dl-box">
       <h3 class="side-title">⬇ 下载这套图</h3>
-      <div class="side-dl-wrap">${dlBtn}</div>
-      ${dlCodes.length ? `<p class="side-note">${dlCodes.join(' · ')}</p>` : ''}
-      ${s.imageCount > s.previews.length ? `<p class="side-note dim">本页展示前 ${s.previews.length} 张预览${hasDlTarget ? `，完整 ${s.imageCount} 张请点上方按钮` : `（共 ${s.imageCount} 张）`}</p>` : ''}
-      ${!hasDlTarget && !PUBLIC ? `<p class="side-note dim">在后台「✎ 编辑这套图集」里填上网盘链接 / 提取码 / 解压密码，这里会自动变成下载按钮。</p>` : ''}
+      <div class="side-dl-top">
+        <div class="side-dl-wrap">${dlBtn}</div>
+        ${dlCodes.length ? `<p class="side-note">${dlCodes.join(' · ')}</p>` : ''}
+        ${s.imageCount > s.previews.length ? `<p class="side-note dim">本页展示前 ${s.previews.length} 张预览${hasDlTarget ? `，完整 ${s.imageCount} 张请点上方按钮` : `（共 ${s.imageCount} 张）`}</p>` : ''}
+      </div>
+      <dl class="side-info">
+        <dt>图片数量</dt><dd>${s.imageCount} 张</dd>
+        ${s.resolution ? `<dt>图片像素</dt><dd>${esc(s.resolution)}</dd>` : ''}
+        ${s.sizeText ? `<dt>总大小</dt><dd>${esc(s.sizeText)}<span class="dim"> · 单张约 ${esc(fmtSize(Math.round(s.bytes / Math.max(1, s.imageCount))))}</span></dd>` : ''}
+        ${s.packSize ? `<dt>压缩包</dt><dd>${esc(s.packSize)}</dd>` : ''}
+        ${s.olDir ? `<dt>原图存放</dt><dd>${esc(s.netdisk || 'OpenList')}</dd>` : ''}
+        <dt>发布时间</dt><dd>${esc(s.date)}</dd>
+        ${s.password ? `<dt>解压密码</dt><dd><code>${esc(s.password)}</code></dd>` : ''}
+      </dl>
     </section>
     ${(s.model || s.series) ? `<section class="side-box">
       <h3 class="side-title">👤 模特与系列</h3>
@@ -827,18 +838,6 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
         ${modelTotal > moreSets.length + 1 ? `<a class="side-more" href="${rel}model/${encodeURIComponent(s.model || '')}.html">查看全部 ${modelTotal} 套 →</a>` : ''}
       </div>` : ''}
     </section>` : ''}
-    <section class="side-box">
-      <h3 class="side-title">📋 本套信息</h3>
-      <dl class="side-info">
-        <dt>图片数量</dt><dd>${s.imageCount} 张</dd>
-        ${s.resolution ? `<dt>图片像素</dt><dd>${esc(s.resolution)}</dd>` : ''}
-        ${s.sizeText ? `<dt>总大小</dt><dd>${esc(s.sizeText)}<span class="dim"> · 单张约 ${esc(fmtSize(Math.round(s.bytes / Math.max(1, s.imageCount))))}</span></dd>` : ''}
-        ${s.packSize ? `<dt>压缩包</dt><dd>${esc(s.packSize)}</dd>` : ''}
-        ${s.olDir ? `<dt>原图存放</dt><dd>${esc(s.netdisk || 'OpenList')}</dd>` : ''}
-        <dt>发布时间</dt><dd>${esc(s.date)}</dd>
-        ${s.password ? `<dt>解压密码</dt><dd><code>${esc(s.password)}</code></dd>` : ''}
-      </dl>
-    </section>
     ${hotTags.length ? `<section class="side-box">
       <h3 class="side-title">🏷 热门标签</h3>
       <div class="side-tags">${hotTags.map(([t, l]) =>
@@ -1109,20 +1108,20 @@ img{max-width:100%;display:block}
 /* ── 详情页两栏布局：左预览图 + 右信息侧栏（参考同类站）── */
 .detail-layout{display:flex;gap:26px;align-items:flex-start}
 .detail-layout > .detail{flex:1;min-width:0}
-.detail-side{flex:0 0 316px;width:316px;position:sticky;top:80px;max-height:calc(100vh - 96px);overflow-y:auto;
-  scrollbar-width:thin;scrollbar-color:var(--line) transparent;padding-right:2px}
-.detail-side::-webkit-scrollbar{width:6px}
-.detail-side::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
-.detail-side::-webkit-scrollbar-track{background:transparent}
-/* 侧栏比屏幕高时：不做内嵌滚动条，改成"底部吸附"——
-   页面往下滚时侧栏整体跟着走，等它的底边贴到视口底部就停住，
-   于是从上往下滚一遍就能看完整栏，之后它一直留在视野里（参考同类站的做法）。 */
-.detail-side.side-tall{position:sticky;top:var(--side-top,80px);max-height:none;overflow:visible}
-.side-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
-.side-title{margin:0 0 10px;font-size:14px;font-weight:600;color:var(--accent2)}
-.side-dl-wrap{margin:0 0 8px}
+/* 侧栏：内容能一屏放下就完整显示（不出滚动条）；放不下才收口成"栏内滚动"，
+   滚动条本身也隐藏（滚轮照常滚），保证任何时候都看不到滚动条。 */
+.detail-side{flex:0 0 316px;width:316px;position:sticky;top:80px}
+.detail-side.side-tall{max-height:calc(100vh - 96px);overflow-y:auto;
+  scrollbar-width:none;-ms-overflow-style:none}
+.detail-side.side-tall::-webkit-scrollbar{width:0;height:0;display:none}
+.side-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin-bottom:12px}
+.side-title{margin:0 0 8px;font-size:14px;font-weight:600;color:var(--accent2)}
+/* 下载 + 本套信息合并成一块：栏内滚动时它吸在顶部，下载按钮始终看得见 */
+.side-dl-box{position:sticky;top:0;z-index:2}
+.side-dl-wrap{margin:0 0 6px}
+.side-dl-box .side-dl{padding:7px 14px;font-size:13.5px}   /* 侧栏里的下载按钮紧凑一点 */
 /* 侧栏：模特的其他作品（缩略图 + 标题 + 日期/张数） */
-.side-sub{margin:12px 0 8px;font-size:12px;color:var(--dim);border-top:1px solid var(--line);padding-top:10px}
+.side-sub{margin:9px 0 6px;font-size:12px;color:var(--dim);border-top:1px solid var(--line);padding-top:8px}
 .side-sub.first{margin-top:0;border-top:0;padding-top:0}
 /* 侧栏里的模特资料引文（原正文顶部的那段，搬进侧栏后收紧排版）
    用 .pf-quote.side-quote 提高权重，否则会被后面的 .pf-quote 覆盖 */
@@ -1132,41 +1131,68 @@ img{max-width:100%;display:block}
 html[data-theme="light"] .pf-quote.side-quote{background:linear-gradient(90deg,rgba(255,180,84,.16),transparent 70%)}
 .pf-quote.side-quote p{margin:0}
 .pf-quote.side-quote p + p{margin-top:5px}
-.side-sets{display:flex;flex-direction:column;gap:4px}
-.side-set{display:flex;gap:9px;align-items:center;padding:5px 6px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
+.side-sets{display:flex;flex-direction:column;gap:3px}
+.side-set{display:flex;gap:8px;align-items:center;padding:4px 5px;border-radius:9px;text-decoration:none;color:inherit;transition:background .15s}
 .side-set:hover{background:var(--panel2)}
-.ss-cover{flex:0 0 52px;width:52px;height:69px;border-radius:7px;overflow:hidden;background:var(--panel2)}
+.ss-cover{flex:0 0 46px;width:46px;height:61px;border-radius:7px;overflow:hidden;background:var(--panel2)}
 .ss-cover img{width:100%;height:100%;object-fit:cover;display:block}
-.ss-body{min-width:0;display:flex;flex-direction:column;gap:3px}
-.ss-body b{font-size:13px;line-height:1.4;font-weight:600;
+.ss-body{min-width:0;display:flex;flex-direction:column;gap:2px}
+.ss-body b{font-size:12.5px;line-height:1.4;font-weight:600;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ss-meta{font-size:11.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.side-more{display:block;margin-top:8px;font-size:12.5px;color:var(--accent);text-decoration:none}
+.side-more{display:block;margin-top:6px;font-size:12.5px;color:var(--accent);text-decoration:none}
 .side-more:hover{text-decoration:underline}
 .side-box .btn{width:100%;justify-content:center;display:flex}
-.side-note{margin:8px 0 0;font-size:12px;line-height:1.7;color:var(--dim)}
+.side-note{margin:6px 0 0;font-size:12px;line-height:1.6;color:var(--dim)}
 .side-note code{background:var(--panel2);padding:1px 6px;border-radius:5px;color:var(--fg)}
 .side-links{display:flex;flex-direction:column;gap:8px}
-.side-link{display:block;padding:8px 12px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);
+.side-link{display:block;padding:7px 11px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);
   color:var(--fg);text-decoration:none;font-size:13px;transition:.15s}
 .side-link:hover{border-color:var(--accent);color:var(--accent)}
-.side-info{margin:0;display:grid;grid-template-columns:auto 1fr;gap:7px 12px;font-size:13px}
+.side-info{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12.5px}
 .side-info dt{color:var(--dim);white-space:nowrap}
 .side-info dd{margin:0;word-break:break-word}
 .side-info code{background:var(--panel2);padding:1px 6px;border-radius:5px}
-.side-tags{display:flex;flex-wrap:wrap;gap:6px}
-.side-tag{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;background:var(--panel2);
+.side-tags{display:flex;flex-wrap:wrap;gap:5px}
+.side-tag{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;background:var(--panel2);
   border:1px solid var(--line);color:var(--dim);font-size:12px;text-decoration:none;transition:.15s}
 .side-tag span{font-size:11px;opacity:.7}
 .side-tag:hover{color:var(--accent);border-color:var(--accent)}
+/* 视口不够高时自动收紧侧栏（只压间距/字号，不改结构），
+   目标：整栏一屏放得下 → 不出现滚动条。1000px 以上才用宽松版。 */
+@media (min-width:1001px) and (max-height:1000px){
+  .side-box{padding:10px 12px;margin-bottom:9px}
+  .side-title{margin-bottom:6px;font-size:13.5px}
+  .side-dl-box .side-dl{padding:5px 12px;font-size:13px}
+  .side-note{font-size:11.5px;line-height:1.5}
+  .side-sub{margin:6px 0 4px;padding-top:5px}
+  .pf-quote.side-quote{font-size:12px;line-height:1.7;padding:6px 0 6px 10px}
+  .ss-cover{flex-basis:36px;width:36px;height:47px}
+  .side-set{padding:2px 4px}
+  .side-sets{gap:2px}
+  .ss-body b{font-size:12px}
+  .side-more{margin-top:3px}
+  .side-info{gap:3px 10px;font-size:11.8px}
+  .side-tag{padding:1px 8px;font-size:11.5px}
+  .side-tags + .side-note{display:none}      /* 标签框里的"查看全部标签"让位给一屏显示 */
+}
+/* 更矮的窗口：再砍掉"其他作品"的第 2 条和多余标签 */
+@media (min-width:1001px) and (max-height:788px){
+  .side-set:nth-of-type(n+2){display:none}   /* 同栏 a 元素里的第 2 条起：只留 1 条作品 */
+  .side-tag:nth-child(n+5){display:none}
+  .side-tags + .side-note{display:none}      /* 标签框里的"查看全部标签"也让位 */
+  .side-info{gap:3px 10px}
+}
 /* 窄屏：单栏 + 底部固定下载条（参考同类站的做法） */
 .mobile-dl-bar{display:none}
 .mobile-dl-bar[hidden]{display:none}
 @media (max-width:1000px){
   .detail-layout{flex-direction:column;gap:18px}
   .detail-side{position:static;width:100%;flex:none;max-height:none;overflow:visible}
-  .detail-side.side-tall{position:static;top:auto}   /* 手机端侧栏在正文下方，不做吸附 */
-  body:has(.mobile-dl-bar:not([hidden])) .side-box:first-child{display:none}  /* 下载已在底部固定条里 */
+  .detail-side.side-tall{position:static;top:auto;max-height:none;overflow:visible}  /* 手机端侧栏在正文下方，不做吸附 */
+  .side-dl-box{position:static}                      /* 手机端不做二次吸顶 */
+  /* 下载已在底部固定条里，这里只把按钮/提示收起来；下面那串本套信息要留着 */
+  body:has(.mobile-dl-bar:not([hidden])) .side-dl-top{display:none}
   body:has(.mobile-dl-bar:not([hidden])){padding-bottom:76px}
   .mobile-dl-bar:not([hidden]){display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;
     padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));gap:10px;align-items:center;justify-content:center;
@@ -1711,21 +1737,13 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     window.__masonry = { layout, items, gallery };
   }
 
-  // 详情页侧栏：内容比屏幕高时不再吸顶（避免嵌套滚动条），跟着页面一起滚
+  // 详情页侧栏：内容能一屏放下就完整显示（不加 max-height → 不出滚动条）；
+  // 只有内容比视口还高时才加 side-tall 收口（栏内滚动，滚动条隐藏）。
   const sideEl = document.querySelector('.detail-side');
   if (sideEl) {
-    // 侧栏高于视口时用"底部吸附"：算出负的 top，让它的底边停在视口底部上方 20px；
-    // 这样滚动时整栏跟着走、滚完就钉住，既没有内嵌滚动条，信息也一直在视野里。
     const fitSide = () => {
-      const h = sideEl.scrollHeight;
       const vh = window.innerHeight;
-      if (h > vh - 120) {
-        sideEl.style.setProperty('--side-top', Math.round(vh - h - 20) + 'px');
-        sideEl.classList.add('side-tall');
-      } else {
-        sideEl.classList.remove('side-tall');
-        sideEl.style.removeProperty('--side-top');
-      }
+      sideEl.classList.toggle('side-tall', sideEl.scrollHeight > vh - 96);
     };
     fitSide();
     window.addEventListener('resize', fitSide);
