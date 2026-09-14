@@ -38,3 +38,7 @@ vision.json
 # 本地截图/临时产物
 _shots/
 
+
+# 隐藏套图密码（只在本机，不进仓库）
+.hidden.json
+blur/

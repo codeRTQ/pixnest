@@ -1006,6 +1006,7 @@ code{background:rgba(255,180,84,.15);color:#ffb454;padding:1px 6px;border-radius
 .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 6px 5px 12px;border-radius:999px;background:rgba(91,140,255,.14);border:1px solid rgba(91,140,255,.45);color:var(--fg);font-size:13px}
 .chip button{border:none;background:rgba(255,255,255,.12);color:var(--fg);width:18px;height:18px;line-height:1;border-radius:50%;cursor:pointer;font-size:12px;padding:0}
 .chip button:hover{background:var(--err);color:#fff}
+.ok-chip{padding:4px 10px;background:rgba(78,201,154,.14);border-color:rgba(78,201,154,.45);color:#4ec99a;font-size:12px}
 .chip-ai{background:rgba(255,180,84,.12);border-color:rgba(255,180,84,.5);color:var(--accent2);cursor:pointer;padding:4px 12px}
 .chip-ai:hover{background:rgba(255,180,84,.25)}
 .chip-add{display:flex;gap:8px;margin-top:8px}
@@ -1040,16 +1041,21 @@ table.lk tr.bad td{color:#ff8a8a}
 .sets[data-view="list"] .pinbadge{position:static;margin-right:2px}
 .set.picked{outline:2px solid var(--accent)}
 /* 封面裁剪器 */
-.cropper{position:fixed;inset:0;z-index:200;background:rgba(8,10,14,.96);overflow:auto;padding:20px}
-.crop-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:var(--fg);font-size:14px;margin-bottom:12px}
+.cropper{position:fixed;inset:0;z-index:200;background:rgba(8,10,14,.96);overflow:auto;padding:12px 20px}
+/* 顶部按钮条吸顶：弹层内容比屏幕高时，滚动也不会把「保存」滚出视野 */
+.crop-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;color:var(--fg);font-size:14px;
+  position:sticky;top:0;z-index:6;background:rgba(8,10,14,.97);padding:8px 0 9px;margin-bottom:6px;
+  border-bottom:1px solid var(--line)}
 .crop-head select{padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg)}
+.crop-warn{margin:0 0 8px;font-size:12px;color:var(--dim)}
+.crop-warn b{color:var(--accent2)}
 .crop-stage{position:relative;display:inline-block;max-width:100%;user-select:none;touch-action:none}
-.crop-stage img{max-width:min(1100px,92vw);max-height:72vh;display:block;border-radius:8px}
+.crop-stage img{max-width:min(1100px,92vw);max-height:56vh;display:block;border-radius:8px}
 .crop-box{position:absolute;border:2px solid var(--accent);box-shadow:0 0 0 9999px rgba(0,0,0,.55);cursor:move;border-radius:2px}
 .crop-grip{position:absolute;right:-8px;bottom:-8px;width:18px;height:18px;background:var(--accent);border-radius:4px;cursor:nwse-resize;border:2px solid #fff}
 .crop-head b{font-size:15px}
-.crop-strip{display:flex;gap:6px;overflow-x:auto;padding:2px 0 10px;margin-bottom:6px}
-.crop-strip img{width:46px;height:62px;object-fit:cover;border-radius:6px;cursor:pointer;opacity:.55;
+.crop-strip{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;margin-bottom:4px}
+.crop-strip img{width:40px;height:54px;object-fit:cover;border-radius:6px;cursor:pointer;opacity:.55;
   border:2px solid transparent;background:#111;flex:0 0 auto;transition:.15s}
 .crop-strip img:hover{opacity:.9}
 .crop-strip img.on{opacity:1;border-color:var(--accent)}
@@ -1309,6 +1315,7 @@ function buildCropModal(){
     '<button class="btn ghost sm" id="cropReset" title="把选区恢复成默认大小（居中）">↺ 重置选区</button>',
     '<button class="btn ghost sm" id="cropCancel">取消</button>',
     '<span class="sub" id="cropTip">'+m.tip+'</span></div>',
+    '<p class="crop-warn">拖好选区后<b>必须点「'+m.save+'」</b>才生效（直接关掉弹层＝放弃这次裁剪）· Enter 也能保存 / Esc 取消</p>',
     '<div class="crop-strip" id="cropStrip"></div>',
     '<div class="crop-stage" id="cropStage"><img id="cropImgEl" alt=""><div class="crop-box'+(CROP.mode==='avatar'?' round':'')+'" id="cropBox"></div>',
     CROP.mode==='banner'?'<div class="crop-safe"><span>标题文字区（会被压暗/遮住）</span></div>':'',
@@ -1320,10 +1327,30 @@ function buildCropModal(){
     '<p class="sub" id="cropInfo" style="margin:8px 0 0"></p>'
   ].join('');
   document.body.appendChild(box);
-  document.getElementById('cropCancel').onclick=function(){box.remove()};
+  document.getElementById('cropCancel').onclick=function(){cancelCrop()};
   document.getElementById('cropSave').onclick=function(){saveCropNow()};
   const rb=document.getElementById('cropReset');
   if(rb)rb.onclick=function(){resetCropBox()};
+  CROP.dirty=false;
+  // 弹层开着且有改动时，页面要跳走/刷新（例如表单保存完成、手滑刷新）先拦一下，
+  // 否则裁剪白做：编辑页点「保存」是整页 POST，响应回来时会把弹层一起刷掉
+  window.onbeforeunload=function(e){
+    const c=document.getElementById('cropper');
+    if(c&&CROP.dirty){e.preventDefault();e.returnValue='';return ''}
+  };
+  document.onkeydown=function(e){
+    const c=document.getElementById('cropper');if(!c)return;
+    if(e.key==='Escape'){e.preventDefault();cancelCrop()}
+    else if(e.key==='Enter'){e.preventDefault();saveCropNow()}
+  };
+}
+function closeCropModal(){
+  CROP.dirty=false;window.onbeforeunload=null;document.onkeydown=null;
+  const c=document.getElementById('cropper');if(c)c.remove();
+}
+function cancelCrop(){
+  if(CROP.dirty&&!confirm('放弃这次裁剪？（没点「保存」的话不会生效）'))return;
+  closeCropModal();
 }
 function setCropImage(img){
   CROP.img=img;
@@ -1380,6 +1407,7 @@ function initCropBox(){
   const onMove=function(e){
     if(!mode)return;const p=pt(e);
     const dx=p.x-sx0,dy=p.y-sy0;
+    if(Math.abs(dx)>1||Math.abs(dy)>1)CROP.dirty=true;
     if(mode==='move'){
       CROP.x=Math.max(0,Math.min(CROP.dispW-CROP.w,c0.x+dx));
       CROP.y=Math.max(0,Math.min(CROP.dispH-CROP.h,c0.y+dy));
@@ -1427,10 +1455,27 @@ function saveCropNow(){
     x:Math.round(CROP.x*sc.sx),y:Math.round(CROP.y*sc.sy),
     w:Math.round(CROP.w*sc.sx),h:Math.round(CROP.h*sc.sy)};
   if(CROP.mode==='avatar')payload.model=CROP.model;
-  toast('正在生成并重建…');
+  const btn=document.getElementById('cropSave');
+  if(btn){btn.disabled=true;btn.textContent='保存中…'}
+  toast('正在生成并重建（约 6 秒）…');
   fetch(CROP_META[CROP.mode].url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-    .then(function(r){return r.text()}).then(function(t){toast(t,true);const c=document.getElementById('cropper');if(c)c.remove();setTimeout(function(){location.reload()},1400)})
-    .catch(function(e){toast('失败：'+e,false)});
+    .then(function(r){return r.text().then(function(t){return {ok:r.ok,t:t}})})
+    .then(function(res){
+      if(!res.ok){
+        // 失败就别关弹层：选区还在，改完能重试（原来无论成败都关掉+刷新，看着像"没保存就退出来了"）
+        toast('保存失败：'+res.t,false);
+        if(btn){btn.disabled=false;btn.textContent=CROP_META[CROP.mode].save}
+        return;
+      }
+      toast(res.t,true);
+      CROP.dirty=false;window.onbeforeunload=null;
+      const c=document.getElementById('cropper');if(c)c.remove();
+      setTimeout(function(){location.reload()},1400);
+    })
+    .catch(function(e){
+      toast('失败：'+e,false);
+      if(btn){btn.disabled=false;btn.textContent=CROP_META[CROP.mode].save}
+    });
 }
 function clearAvatar(model){
   if(!confirm('清除「'+model+'」的自定义头像？（退回用最新一套的封面）'))return;
@@ -1444,6 +1489,22 @@ function clearBanner(slug){
   toast('处理中…');
   fetch('/clearbanner',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug:slug})})
     .then(function(r){return r.text()}).then(function(t){toast(t,true);setTimeout(function(){location.reload()},1400)})
+    .catch(function(e){toast('失败：'+e,false)});
+}
+// ── 隐藏套图：快速开关 + 全局密码 ──
+function toggleHidden(slug,on){
+  if(on&&!confirm('隐藏这套图？列表里只会显示模糊封面，点不进去；要输密码才能查看。'))return;
+  toast('处理中…');
+  fetch('/sethidden',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug:slug,hidden:!!on})})
+    .then(function(r){return r.text()}).then(function(t){toast(t,true);setTimeout(function(){location.reload()},1400)})
+    .catch(function(e){toast('失败：'+e,false)});
+}
+function saveHiddenCfg(){
+  const pw=document.getElementById('hidPw').value.trim(),hint=document.getElementById('hidHint').value.trim();
+  if(!pw&&!confirm('密码留空＝关闭隐藏功能（已隐藏的套图会重新变成公开）。继续？'))return;
+  toast('保存并重建中…');
+  fetch('/hidden',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw,hint:hint})})
+    .then(function(r){return r.text()}).then(function(t){toast(t,true);setTimeout(function(){location.reload()},1600)})
     .catch(function(e){toast('失败：'+e,false)});
 }
 """
@@ -1560,6 +1621,8 @@ def sets_cards(sets, view='card'):
                     title="从本套图里选一张裁成首页轮播大图（1600×450）；只有置顶图集才会出现在首页轮播">🖼 大图</button>
             <button class="mini" data-slug="{esc_attr(s['slug'])}" onclick="event.stopPropagation();openCropper(this.dataset.slug)"
                     title="从本套图里选一张裁封面（3:4，列表卡片用）">✂ 封面</button>
+            <button class="mini" data-slug="{esc_attr(s['slug'])}" onclick="event.stopPropagation();toggleHidden(this.dataset.slug,{0 if m.get('hidden') else 1})"
+                    title="隐藏后列表只显示模糊封面、点不进去，需密码查看">{"🔓 取消隐藏" if m.get("hidden") else "🔒 隐藏"}</button>
             <button class="mini" onclick="event.stopPropagation();del('{s['slug']}')">删除</button>
           </div></div></div>""")
     return ''.join(cards) or '<p class="sub">没有匹配的图集</p>'
@@ -2075,7 +2138,8 @@ def models_page(msg=''):
                   if av else (f'<img src="{esc_attr(st["cover"])}" alt="" title="未设置头像，暂用最新一套的封面" '
                               f'style="width:64px;height:64px;object-fit:cover;border-radius:50%;background:#111;border:2px dashed var(--line);opacity:.6">'
                               if st['cover'] else '<span class="sub">无图</span>'))
-        av_state = '✅ 已设置自定义头像' if av else '未设置自定义头像（暂用最新一套的封面，圆形展示）'
+        av_state = ('<span class="chip ok-chip">已用自定义头像</span>' if av
+                    else '<span class="sub">暂用封面当头像</span>')
         inputs = ''.join(
             f'<div><label>{label}</label><input type="text" data-f="{k}" value="{esc_attr(pf.get(k, ""))}" placeholder="{ph}"></div>'
             for k, label, ph in FIELDS)
@@ -2084,35 +2148,34 @@ def models_page(msg=''):
     {av_img}
     <span>👤 {esc_attr(model)}
       <span class="sub" style="font-weight:400">· {st['sets']} 套 · {st['images']} 张{(' · 合计 ' + st['size']) if st['size'] else ''}{(' · 最新 ' + st['latest']) if st['latest'] else ''}</span>
-      <span class="sub" style="display:block;font-weight:400">{av_state}</span>
+      <span class="sub" style="display:block;font-weight:400">资料 {filled} / {len(FIELDS)} 字段{'' if filled else '（全空）'}</span>
+    </span>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:10px">
+      {av_state}
+      <button class="btn sm" data-m="{esc_attr(model)}" onclick="openAvatarCropper(this.dataset.m)">🙂 设置头像</button>
+      {f'<button class="btn ghost sm" data-m="{esc_attr(model)}" onclick="clearAvatar(this.dataset.m)">清除</button>' if av else ''}
     </span>
   </h2>
-  <div class="row" style="margin:8px 0 4px;align-items:center">
-    <button class="btn sm" data-m="{esc_attr(model)}" onclick="openAvatarCropper(this.dataset.m)">🙂 设置头像</button>
-    {f'<button class="btn ghost sm" data-m="{esc_attr(model)}" onclick="clearAvatar(this.dataset.m)">清除头像</button>' if av else ''}
-    <span class="sub" style="margin:0">从该模特名下任意一套图里挑一张，裁成方形（站点上按圆形展示）</span>
-  </div>
-  <p class="sub" style="margin-top:6px">资料完整度：{filled} / {len(FIELDS)} 个字段{'' if filled else '（留空的字段不会在站点上展示）'} · 详情页只展示模特名与作品，资料统一在模特页展示</p>
-  <div class="row" style="margin:10px 0 4px;align-items:center">
-    <label style="margin:0">模特名</label>
-    <input type="text" class="mname" value="{esc_attr(model)}" style="max-width:220px">
-    <button class="btn danger sm" onclick="renameModel(this)">改名 / 合并到（应用到 {st['sets']} 套）</button>
-    <span class="sub" style="margin:0">改名会写入这 {st['sets']} 套图的元数据并重建站点；填一个已存在的名字＝合并</span>
-  </div>
-  <div class="grid2">{inputs}</div>
+  <div class="grid2" style="margin-top:12px">{inputs}</div>
   <div class="row" style="margin-top:12px">
     <button class="btn" onclick="saveModel(this)">保存并重建</button>
     <button class="btn danger sm" onclick="clearModel(this)">清空资料</button>
-    <a class="btn ghost sm" href="/?q={quote(model)}" target="_blank">在后台筛选这 {st['sets']} 套</a>
+    <span class="sub" style="margin:0 0 0 16px">改名 / 合并到 →</span>
+    <input type="text" class="mname" placeholder="新名字（填已有名字＝合并）" style="max-width:230px">
+    <button class="btn ghost sm" onclick="renameModel(this)">应用到这 {st['sets']} 套</button>
+    <a class="btn ghost sm" href="/?q={quote(model)}" target="_blank">筛选这 {st['sets']} 套</a>
     <span class="sub mstate" style="margin:0"></span>
   </div>
 </div>""")
     return page('模特资料', f"""
 <a class="btn ghost sm" href="/">← 返回后台</a>
 <div class="panel"><h2>模特资料（按模特统一维护）</h2>
-  <p class="sub">这里改一次，该模特名下<b>所有图集</b>都生效，不用一套套改。留空的字段不会展示。<br>
-    如果某套图集需要特殊资料，可在该图集的编辑页单独填写（会覆盖这里的值）。<br>
-    <b>头像</b>：点「🙂 设置头像」→ 选图集 → 选图片 → 拖动选区（正方形）→ 保存，站点上按圆形展示；不设置就用最新一套的封面。</p>
+  <ul class="sub" style="margin:6px 0 0;padding-left:20px;line-height:1.9">
+    <li>这里改一次，该模特名下<b>所有图集</b>都生效；留空的字段不会在站点展示，某套要特殊资料可在该图集的编辑页单独填（覆盖这里的值）。</li>
+    <li><b>资料只在「模特页」展示</b>：图集详情页侧栏只显示模特名 + 作品入口，不带出生/身高这类资料。</li>
+    <li><b>头像</b>：点「🙂 设置头像」→ 选图集 → 选图片 → 拖正方形选区 → 保存；不设置就用该模特最新一套的封面。</li>
+    <li><b>改名 / 合并</b>：填一个新名字＝改组内所有图集的模特名；填一个已存在的名字＝把两位模特合并。</li>
+  </ul>
 </div>
 {''.join(blocks)}
 <script>window.MODEL_SETS={json.dumps(model_sets_js, ensure_ascii=False)};</script>""", extra_js="""
@@ -2166,6 +2229,88 @@ def write_model_profile(model, profile):
     elif os.path.exists(p):
         os.remove(p)
     return p
+
+
+# ───────────── 隐藏套图（模糊封面 + 密码解锁）─────────────
+# 原理：隐藏套图的页面与图片不放在公开的 set/<slug>/ 下，而是放在 h/<token>/ 下，
+#      token = sha256(密码 + '|' + slug) 的前 16 位 —— 不知道密码就算不出这个路径，
+#      而且生成的 HTML 里只出现模糊小图与提示，不出现 token。
+#      密码放在 .hidden.json（已 gitignore，不进仓库、不随站点发布）。
+HIDDEN_CFG_PATH = os.path.join(ROOT, '.hidden.json')
+
+
+def read_hidden_cfg():
+    try:
+        return json.load(open(HIDDEN_CFG_PATH, encoding='utf-8'))
+    except Exception:  # noqa
+        return {}
+
+
+def write_hidden_cfg(cfg):
+    json.dump(cfg, open(HIDDEN_CFG_PATH, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+    return HIDDEN_CFG_PATH
+
+
+def hidden_pw():
+    """全局隐藏密码（没设就返回空串）"""
+    return str((read_hidden_cfg() or {}).get('password') or '')
+
+
+def hidden_hint():
+    return str((read_hidden_cfg() or {}).get('hint') or '这套图已隐藏，输入密码后查看')
+
+
+def hidden_token(slug, password):
+    """与 build.mjs 的 hiddenToken() 完全一致：sha256(密码 + '|' + slug) 前 16 位"""
+    return hashlib.sha256(((password or '') + '|' + slug).encode('utf-8')).hexdigest()[:16]
+
+
+def set_hidden(slug, on, own_pw=None):
+    """开关隐藏 + 生成模糊小图（锁定卡片用的公开底图）"""
+    set_dir = os.path.join(SETS_DIR, slug)
+    if not os.path.isdir(set_dir):
+        return False, '图集不存在', None
+    meta = read_meta(set_dir)
+    pw = (own_pw if own_pw is not None else str(meta.get('hidePassword') or '')).strip()
+    if on and not (pw or hidden_pw()):
+        return False, '还没有设置隐藏密码：先在首页「🔒 隐藏套图」面板里设一个总密码，或给这套单独填一个', None
+    meta['hidden'] = bool(on)
+    if not on:
+        meta.pop('hidden', None)          # 取消隐藏就把字段清掉，meta.json 干净
+    if pw:
+        meta['hidePassword'] = pw
+    elif not on:
+        meta.pop('hidePassword', None)
+    save_meta(set_dir, meta)
+    if on:
+        try:
+            make_blur(set_dir)
+        except Exception as e:  # noqa
+            log_line('error', f'生成模糊封面失败 {slug}: {e}')
+    eff = pw or hidden_pw()
+    return True, ('✓ 已隐藏（密码：' + ('单套密码' if pw else '全局密码') + '）' if on else '✓ 已取消隐藏'), hidden_token(slug, eff)
+
+
+def make_blur(set_dir):
+    """公开的模糊小图：压到 24px + 高斯模糊，肉眼只剩色块（放在 sets/<slug>/blur.jpg 与 thumbs/blur.webp）"""
+    from PIL import ImageFilter
+    cover = next((f for f in ('cover.jpg', 'cover.jpeg', 'cover.png', 'cover.webp')
+                  if os.path.exists(os.path.join(set_dir, f))), None)
+    if not cover:
+        return None
+    im = ImageOps.exif_transpose(Image.open(os.path.join(set_dir, cover))).convert('RGB')
+    im.thumbnail((24, 24), Image.LANCZOS)
+    im = im.filter(ImageFilter.GaussianBlur(2.2))
+    out = os.path.join(set_dir, 'blur.jpg')
+    im.save(out, 'JPEG', quality=62)
+    tdir = os.path.join(set_dir, 'thumbs')
+    os.makedirs(tdir, exist_ok=True)
+    if WEBP_ENABLED:
+        try:
+            im.save(os.path.join(tdir, 'blur.webp'), 'WEBP', quality=62, method=6)
+        except Exception:  # noqa
+            pass
+    return out
 
 
 def model_safe(model):
@@ -2466,6 +2611,8 @@ def home_page(msg='', q='', page_no=1, per=24, sort='date-desc', view='card'):
     base_qs = base_qs.lstrip('&') or 'per=24'
     sets = all_sets  # 顶部统计/其它区块仍用全量
     untagged = sum(1 for s in all_sets if not (s['meta'].get('autoTags') or []))
+    hidden_names = [s['meta'].get('title') or s['slug'] for s in all_sets if s['meta'].get('hidden')]
+    hidden_n = len(hidden_names)
     body = f"""
 <h1>图集管理后台</h1>
 <p class="sub">上传 → 自动生成缩略图(长边 {PREVIEW_LONG}px)+模糊占位图 → 写入 sets/ → 重建静态站 · 端口 {PORT}</p>
@@ -2557,7 +2704,23 @@ def home_page(msg='', q='', page_no=1, per=24, sort='date-desc', view='card'):
     <div class="pub-head"><b>批量自动打标</b><span id="atMsg" class="sub" style="margin:0"></span></div>
     <div class="progress" id="atWrap"><div class="bar" id="atBar"></div></div>
     <pre id="atLog"></pre>
-  </div></div>"""
+  </div>
+  <details class="panel" style="margin-top:14px"{' open' if not hidden_pw() else ''}>
+    <summary style="cursor:pointer;font-weight:600;font-size:15px">🔒 隐藏套图（模糊封面 + 密码查看）<span class="sub" style="font-weight:400"> · {hidden_n} 套已隐藏 · {('密码已设置' if hidden_pw() else '⚠️ 还没设置密码')}</span></summary>
+    <p class="sub" style="margin:10px 0 8px">勾了「隐藏」的套图：列表里只显示<b>模糊封面</b>、点不进去，输入密码后才能打开。<br>
+      密码只存在本地 <code>.hidden.json</code>（已 gitignore，不会进仓库、不会随站点发布）；隐藏套图的页面与图片会被放到
+      <code>/h/&lt;密码算出来的随机串&gt;/</code> 下 —— 不知道密码就算不出地址，站点源码里也不出现它，所以爬虫和路人都拿不到。<br>
+      换密码会让所有隐藏套图的地址一起变（已发出去的旧链接失效）；取消隐藏则恢复成公开图集。</p>
+    <div class="row" style="align-items:center">
+      <label style="margin:0">全局密码</label>
+      <input type="text" id="hidPw" value="{esc_attr(hidden_pw())}" placeholder="留空＝关闭隐藏功能" style="max-width:280px">
+      <label style="margin:0">解锁提示语</label>
+      <input type="text" id="hidHint" value="{esc_attr(hidden_hint())}" placeholder="私密套图，请输入密码查看" style="max-width:320px">
+      <button class="btn" onclick="saveHiddenCfg()">保存并重建</button>
+      <span class="sub" style="margin:0">改密码后所有隐藏套图地址都会变，需要重新分享链接</span>
+    </div>
+    {f'<p class="sub">已隐藏：{"、".join(hidden_names)}</p>' if hidden_names else '<p class="sub">还没有隐藏任何套图：在卡片上点「🔒 隐藏」，或在编辑页勾选。</p>'}
+  </details></div>"""
     extra = """
 const drop=document.getElementById('drop'),imgs=document.getElementById('imgs'),files=document.getElementById('files');
 const mk=document.getElementById('mkcover'),cf=document.getElementById('coverfile'),pc=document.getElementById('pickcover'),cn=document.getElementById('covername');
@@ -2749,6 +2912,14 @@ def edit_page(slug, msg=''):
       <div><label>置顶顺序（1 在最前，留空自动排到最后）</label><input type="number" min="1" name="pinOrder" value="{m.get('pinOrder','')}"></div>
       <div><label>置顶到期日（留空=长期有效，到期自动从轮播撤下）</label><input type="date" name="pinUntil" value="{m.get('pinUntil','')}"></div>
     </div>
+    <div><label style="margin-top:12px">🔒 隐藏这套图（列表里只显示模糊封面、点不进去；输入密码才看得到）</label></div>
+    <div class="grid2">
+      <div><label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" name="hidden" value="1" style="width:auto"{" checked" if m.get('hidden') else ""}> 隐藏这套图
+      </label></div>
+      <div><label>单套密码（留空＝用全局密码；填了这套就用它）</label><input type="text" name="hidePassword" value="{m.get('hidePassword','')}" placeholder="{('当前全局密码已设置' if hidden_pw() else '⚠️ 还没设置全局密码，先去首页「🔒 隐藏套图」里设一个')}"></div>
+    </div>
+    {f'<p class="sub" style="margin:-2px 0 8px">本套访问地址（不知道密码算不出来，可以直接发给朋友）：<code>/h/{hidden_token(slug, m.get("hidePassword") or hidden_pw())}/</code></p>' if m.get('hidden') and (m.get('hidePassword') or hidden_pw()) else ''}
     <div><label style="margin-top:12px">模特资料（选填 · 填了才在详情页展示 · AI 不会自动生成这些）</label></div>
     <div class="grid2">
       <div><label>出生</label><input type="text" name="p_birth" value="{pf.get('birth','')}" placeholder="如 1998"></div>
@@ -2777,7 +2948,7 @@ def edit_page(slug, msg=''):
   <div class="row"><label style="margin:0">追加图片（可多选，会附加到末尾）</label><input type="file" name="images" accept="image/*" multiple></div>
   <div class="row"><label style="margin:0">替换压缩包 pack.zip</label><input type="file" name="pack" accept=".zip"></div>
   <div class="row"><button class="btn" type="submit">保存并重建站点</button>
-    <a class="btn ghost" href="http://127.0.0.1:8090/set/{quote(slug)}/index.html" target="_blank">打开详情页 ↗</a></div>
+    <a class="btn ghost" href="http://127.0.0.1:8090/{('h/' + hidden_token(slug, m.get('hidePassword') or hidden_pw())) if (m.get('hidden') and (m.get('hidePassword') or hidden_pw())) else ('set/' + quote(slug))}/index.html" target="_blank">打开详情页 ↗</a></div>
 </form>
 
 <div class="panel"><h2>② 图片管理（{len(imgs)} 张）</h2>
@@ -3199,6 +3370,30 @@ class Handler(BaseHTTPRequestHandler):
             n = clear_banner(d.get('slug', ''))
             ok, out = rebuild()
             return self._text(f'✓ 已清除自定义 Banner（退回用封面）（删除 {n} 个文件）\n重建：' + ('成功' if ok else '失败'))
+        if u.path == '/hidden':
+            # 全局隐藏密码 / 提示语（存 .hidden.json，已 gitignore）；改完必须重建（地址随密码变）
+            d = self._json_body()
+            cfg = read_hidden_cfg() or {}
+            cfg['password'] = str(d.get('password') or '').strip()
+            if d.get('hint'):
+                cfg['hint'] = str(d['hint']).strip()
+            else:
+                cfg.pop('hint', None)
+            write_hidden_cfg(cfg)
+            n = sum(1 for s in list_sets() if s['meta'].get('hidden'))
+            ok, out = rebuild()
+            return self._text((f'✓ 全局密码已{"设置" if cfg["password"] else "清空（隐藏功能关闭）"}'
+                               + (f'，{n} 套隐藏图集的访问地址已重新生成' if n else ''))
+                              + '\n重建：' + ('成功' if ok else '失败'))
+        if u.path == '/sethidden':
+            d = self._json_body()
+            ok, m, token = set_hidden(d.get('slug', ''), bool(d.get('hidden')),
+                                      d.get('password') if 'password' in d else None)
+            if not ok:
+                return self._text(m, 400)
+            ok2, out = rebuild()
+            return self._text(m + (f'\n访问地址：/h/{token}/' if token else '')
+                              + '\n重建：' + ('成功' if ok2 else '失败'))
         if u.path == '/reorder':
             d = self._json_body()
             slug = d.get('slug', '')
@@ -3596,6 +3791,23 @@ class Handler(BaseHTTPRequestHandler):
             meta.pop('pinned', None)
             meta.pop('pinOrder', None)
             meta.pop('pinUntil', None)
+        # 隐藏套图：勾选状态 + 单套密码（可见性由构建时算出的 h/<token>/ 路径决定）
+        was_hidden = bool(meta.get('hidden'))
+        now_hidden = g('hidden') in ('1', 'on', 'true')
+        own_pw = g('hidePassword').strip()
+        if now_hidden and not (own_pw or hidden_pw()):
+            hidden_warn = '⚠️ 勾了「隐藏」但没有密码：请先在首页「🔒 隐藏套图」面板里设置全局密码，否则构建时会跳过隐藏'
+            meta.pop('hidden', None)
+        else:
+            hidden_warn = ''
+            if now_hidden:
+                meta['hidden'] = True
+            else:
+                meta.pop('hidden', None)
+        if own_pw:
+            meta['hidePassword'] = own_pw
+        elif not now_hidden:
+            meta.pop('hidePassword', None)
         # 图片像素：自动检测为准（表单留空即自动；手填则作为兜底）
         res_txt, res_info = detect_resolution(set_dir)
         if res_txt:
@@ -3604,13 +3816,20 @@ class Handler(BaseHTTPRequestHandler):
         elif g('resolution'):
             meta['resolution'] = g('resolution')
         save_meta(set_dir, meta)
+        if now_hidden:
+            try:
+                make_blur(set_dir)
+            except Exception as e:  # noqa
+                log_line('error', f'生成模糊封面失败 {slug}: {e}')
 
         ensure_thumbs(set_dir)
         ok, out = rebuild()
         msg = (f'✓ 已保存：{meta["title"]}（{meta["imageCount"]} 张'
                + (f'，新增 {added} 张' if added else '')
                + (f'，跳过 {dup} 张重复' if dup else '')
-               + '）\n重建：' + ('成功' if ok else '失败') + '\n' + out)
+               + (f'，已{"隐藏" if now_hidden else "取消隐藏"}' if was_hidden != now_hidden else '')
+               + '）' + (f'\n{hidden_warn}' if hidden_warn else '')
+               + '\n重建：' + ('成功' if ok else '失败') + '\n' + out)
         return self._html(edit_page(slug, msg))
 
 

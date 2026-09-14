@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 /**
+ * 隐藏套图：全局密码存在项目根的 .hidden.json（已 gitignore，不进仓库也不随站点发布）。
+ * 勾了「隐藏」的套图不会写在公开的 set/<slug>/ 下，而是写到 h/<token>/ 下，
+ *   token = sha256(密码 + '|' + slug) 前 16 位
+ * 不知道密码就算不出这个地址；生成的 HTML 里只出现模糊小图，不出现 token，
+ * 所以爬虫/路人都拿不到隐藏套图的页面与图片（这是纯静态托管能做到的最强隐藏）。
+ */
+/**
  * 图集静态站点生成器（零依赖，纯 Node）
  *
  * 目录约定：
@@ -27,6 +34,24 @@ const DIST_REAL = join(ROOT, 'dist')          // 对外目录：预览服务器�
 const DIST_STAGE = join(ROOT, 'dist.new')     // 构建真正写入的暂存目录
 const DIST_OLD = join(ROOT, 'dist.old')       // 切换时旧产物临时挪到这里
 let DIST = DIST_STAGE                          // 构建期间所有 join(DIST, ...) 都落在暂存目录
+
+/**
+ * 隐藏套图：全局密码存在项目根的 .hidden.json（已 gitignore，不进仓库也不随站点发布）。
+ * 勾了「隐藏」的套图不写到公开的 set/<slug>/ 下，而是写到 h/<token>/ 下，
+ *   token = sha256(密码 + '|' + slug) 前 16 位
+ * 不知道密码就算不出这个地址；生成的 HTML 里只出现模糊小图，不出现 token，
+ * 所以爬虫/路人都拿不到隐藏套图的页面与图片（纯静态托管能做到的最强隐藏方式）。
+ */
+const HIDDEN_CFG = (() => {
+  try { return JSON.parse(readFileSync(join(ROOT, '.hidden.json'), 'utf8')) } catch { return {} }
+})()
+const HIDDEN_PW = String(HIDDEN_CFG.password || '')
+const HIDDEN_HINT = String(HIDDEN_CFG.hint || '这套图已隐藏，输入密码后查看')
+/** 隐藏套图地址的 token（必须与 admin.py 的 hidden_token() 完全一致） */
+const hiddenToken = (s) => createHash('sha256')
+  .update(String(s.hidePassword || HIDDEN_PW) + '|' + s.slug).digest('hex').slice(0, 16)
+/** 隐藏套图的相对地址（如 h/ab12cd34ef567890/），非隐藏返回空串 */
+const hiddenPath = (s) => (s.hiddenOk ? `h/${s.token}/` : '')
 
 // ─────────────────────────── 配置 ───────────────────────────
 const defaultConfig = {
@@ -263,6 +288,12 @@ function readSet(slug) {
   }
   const thumbs = Object.values(thumbFor)
   const coverThumb = ['cover.webp', 'cover.jpg', 'cover.jpeg', 'cover.png'].find(f => existsSync(join(dir, 'thumbs', f)))
+  // 隐藏套图：公共的模糊小图（后台生成），以及密码算出来的私有地址 token
+  const blurThumb = ['blur.webp', 'blur.jpg'].find(f => existsSync(join(dir, 'thumbs', f)))
+  const blurFile = ['blur.jpg', 'blur.webp', 'blur.png'].find(f => existsSync(join(dir, f)))
+  const hidden = !!meta.hidden
+  const hidePassword = String(meta.hidePassword || '')
+  const hiddenOk = hidden && !!(hidePassword || HIDDEN_PW)
   // 自定义 Banner（后台裁剪生成，置顶轮播用；没设置就退回封面）
   const bannerFile = ['banner.jpg', 'banner.jpeg', 'banner.png', 'banner.webp'].find(f => existsSync(join(dir, f)))
   const bannerThumb = ['banner.webp', 'banner.jpg', 'banner.jpeg', 'banner.png'].find(f => existsSync(join(dir, 'thumbs', f)))
@@ -332,6 +363,12 @@ function readSet(slug) {
     coverThumb,
     bannerFile,
     bannerThumb,
+    blurThumb,
+    blurFile,
+    hidden,
+    hiddenOk,
+    hidePassword,
+    token: hiddenOk ? hiddenToken({ slug, hidePassword }) : '',
     images,
     thumbs,
     thumbFor,
@@ -413,13 +450,17 @@ function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
 }
 
 // ─────────────────────────── 模板 ───────────────────────────
-const layout = ({ title, desc, body, rel = '', nav = '', pswp = false, og = null, canonical = '', jsonld = '' }) => `<!DOCTYPE html>
+/** 全站是否真的有隐藏套图（决定要不要在头部显示 🔒 入口）；由主流程赋值 */
+let hiddenCountGlobal = 0
+
+const layout = ({ title, desc, body, rel = '', nav = '', pswp = false, og = null, canonical = '', jsonld = '', noindex = false }) => `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(desc)}">
+${noindex ? '<meta name="robots" content="noindex,nofollow">' : ''}
 ${canonical ? `<link rel="canonical" href="${esc(canonical)}">` : ''}
 ${og ? `<meta property="og:type" content="${esc(og.type || 'website')}">
 <meta property="og:title" content="${esc(title)}">
@@ -448,6 +489,7 @@ ${ADULT_GATE}
     </div>
     <button class="icon-btn" id="randomBtn" title="随便看看">🎲</button>
     <button class="icon-btn" id="themeBtn" title="切换深浅色">🌗</button>
+    ${hiddenCountGlobal ? `<button class="icon-btn" id="lockBtn" title="输入密码查看隐藏图集">🔒</button>` : ''}
     <a class="icon-btn" href="${rel}models.html" title="模特列表">👤</a>
     <a class="icon-btn" href="${rel}collections.html" title="系列与标签">☰</a>
   </div>
@@ -469,10 +511,33 @@ ${ADULT_GATE}
   </div>
 </footer>
 <script src="${rel}assets/app.js?v=${ASSET_V}" defer></script>
+<script>window.PN_REL=${JSON.stringify(rel)};window.PN_HIDDEN_HINT=${JSON.stringify(HIDDEN_HINT)};</script>
 </body>
 </html>`
 
-const card = (s, rel = '') => `
+const card = (s, rel = '') => (s.hidden && !s.hiddenOk)
+  // 隐藏但没配密码（构建时算不出私有地址）→ 只给一张糊图，没有任何入口
+  ? `<article class="card card-locked" data-hid="${esc(s.slug)}">
+  <div class="card-cover locked">
+    ${s.blurThumb ? `<img class="blurred" src="${rel}blur/${esc(s.slug)}.webp" alt="">` : '<div class="no-cover">🔒</div>'}
+    <span class="badge badge-lock">🔒 隐藏</span>
+  </div>
+  <h2 class="card-title">${esc(s.title)}</h2>
+  <div class="card-meta"><span class="lock-hint">还没设置隐藏密码</span></div>
+</article>`
+  : s.hiddenOk
+  ? `<article class="card card-locked" data-hid="${esc(s.slug)}"${s.blurThumb ? ` data-cover="${esc(s.coverThumb || '')}"` : ''}>
+  <div class="card-cover locked">
+    ${s.blurThumb ? `<img class="blurred" src="${rel}blur/${esc(s.slug)}.webp" alt="${esc(s.title)}">` : '<div class="no-cover">🔒</div>'}
+    <span class="badge badge-lock">🔒 隐藏</span>
+  </div>
+  <h2 class="card-title">${esc(s.title)}</h2>
+  <div class="card-meta">
+    <button class="unlock-btn" data-hid="${esc(s.slug)}" title="${esc(HIDDEN_HINT)}">🔓 输入密码查看</button>
+    <time datetime="${esc(s.date)}">${esc(s.date)}</time>
+  </div>
+</article>`
+  : `
 <article class="card" data-title="${esc((s.displayTitle + ' ' + s.model + ' ' + s.tags.join(' ')).toLowerCase())}">
   <a class="card-link" href="${rel}set/${s.slug}/index.html">
     <div class="card-cover">
@@ -528,6 +593,8 @@ function pagerHtml(page, totalPages, hrefOf) {
 /** 置顶推荐轮播（列表页顶部；没有置顶图集时返回空串，页面自动退回标题样式）
  *  布局：左边 16:9 轮播舞台 + 右边置顶清单（点清单可切换，不用等自动播放） */
 function heroHtml(pinned, rel = '') {
+  // 隐藏套图不参与首页轮播（避免把模糊图放到最显眼的位置；想让它出现就先取消隐藏）
+  pinned = pinned.filter(s => !s.hidden)
   if (!pinned.length) return ''
   // 轮播大图：后台裁过 Banner 就用 Banner（默认仍用封面）
   const pic = (s) => s.bannerThumb ? { f: 'thumbs/' + s.bannerThumb, v: s.thumbVer[s.bannerThumb], banner: true }
@@ -767,6 +834,13 @@ function seriesIndexPage(bySeries, allSets) {
 
 function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}, moreSets = [], modelTotal = 0) {
   const rel = '../../'
+  // 本页自己的资源目录：隐藏套图在 h/<token>/ 下，公开套图在 set/<slug>/ 下
+  const self = s.hiddenOk ? `h/${s.token}` : `set/${s.slug}`
+  // 指向另一套图的链接/封面：隐藏的套图不能直接给路径（算不出来），交给页面上的解锁脚本处理
+  const setHref = (x) => (x.hidden ? '' : `${rel}set/${x.slug}/index.html`)
+  const setCoverSrc = (x) => x.hidden
+    ? (x.blurThumb ? `${rel}blur/${encodeURIComponent(x.slug)}.webp` : '')
+    : (x.coverFile ? `${rel}set/${x.slug}/${x.coverThumb ? 'thumbs/' + x.coverThumb + verQ(x.thumbVer[x.coverThumb]) : x.coverFile}` : '')
   // 模特行：头像（后台设了就用圆形头像，否则用该模特另一套的封面）+ 名字 + 套数 → 点进模特页
   // 详情页不再放模特资料（出生/身高/风格…），资料统一只在模特页展示
   const face = moreSets[0] || s
@@ -774,8 +848,8 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
   const modelRow = s.model ? `<a class="side-row" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品">
         ${modelAvatar
           ? `<span class="sr-art sr-round"><img loading="lazy" src="${modelAvatar}" alt="${esc(s.model)}"></span>`
-          : `<span class="sr-art">${face.coverFile
-            ? `<img loading="lazy" src="${rel}set/${face.slug}/${face.coverThumb ? 'thumbs/' + face.coverThumb + verQ(face.thumbVer[face.coverThumb]) : face.coverFile}" alt="${esc(s.model)}">`
+          : `<span class="sr-art">${setCoverSrc(face)
+            ? `<img loading="lazy" class="${face.hidden ? 'blurred' : ''}" src="${setCoverSrc(face)}" alt="${esc(s.model)}">`
             : '👤'}</span>`}
         <span class="sr-body"><b>${esc(s.model)}</b><span class="sr-meta">${modelTotal > 1 ? `${modelTotal} 套图集` : '全部作品'}</span></span>
         <span class="sr-go">›</span>
@@ -787,8 +861,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
       </a>` : ''
 
   const previews = s.previews.length
-    ? `<div class="previews" id="gallery">
-      ${s.previews.map((f, i) => {
+    ? `<div class="previews" id="gallery">      ${s.previews.map((f, i) => {
         // 缩略图文件：优先 webp（体积约为 jpg 一半），jpg 作为老浏览器回退
         const tf = s.thumbFor[f] || f
         const alt = (s.thumbAlt && s.thumbAlt[f]) || ''
@@ -802,15 +875,15 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
         // 原图直链：本地 01.jpg ↔ 网盘 00001.jpg（按序号映射）
         const fi = fileIndex(f)
         const olUrl = (s.olDir && fi) ? olFileUrl(s, olFileName(fi)) : ''
-        const bigSrc = LITE ? `${rel}set/${s.slug}/${thumb}${verQ(s.thumbVer[tf])}` : `${rel}set/${s.slug}/images/${f}`
+        const bigSrc = LITE ? `${rel}${self}/${thumb}${verQ(s.thumbVer[tf])}` : `${rel}${self}/images/${f}`
         return `<figure class="preview" data-ratio="${(size.w / size.h).toFixed(4)}">
         <a class="preview-link" href="${bigSrc}"
            data-pswp-width="${bigW}" data-pswp-height="${bigH}"
-           data-pswp-srcset="${rel}set/${s.slug}/${thumb}${verQ(s.thumbVer[tf])} ${bigW}w"
+           data-pswp-srcset="${rel}${self}/${thumb}${verQ(s.thumbVer[tf])} ${bigW}w"
            data-orig-w="${size.w}" data-orig-h="${size.h}"
            target="_blank" rel="noopener">
-          <img class="ph" ${ph} data-src="${rel}set/${s.slug}/${thumb}${verQ(s.thumbVer[tf])}"
-               ${alt ? `data-fallback="${rel}set/${s.slug}/thumbs/${alt}${verQ(s.thumbVer[alt])}"` : ''}
+          <img class="ph" ${ph} data-src="${rel}${self}/${thumb}${verQ(s.thumbVer[tf])}"
+               ${alt ? `data-fallback="${rel}${self}/thumbs/${alt}${verQ(s.thumbVer[alt])}"` : ''}
                alt="${esc(s.title)} 预览图 ${i + 1}" decoding="async">
         </a>
         ${olUrl ? `<a class="orig-link" href="${esc(olUrl)}" target="_blank" rel="noopener" title="在${esc(s.netdisk || 'OpenList')}打开原图（${size.w}×${size.h}）">原图 ↗</a>` : ''}
@@ -835,7 +908,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
     : (s.downloadUrl && !s.hasPack
       ? `<a class="btn btn-primary side-dl" href="${esc(s.downloadUrl)}" target="_blank" rel="noopener">⬇ 下载图集</a>`
       : (s.hasPack && !LITE
-        ? `<a class="btn btn-primary side-dl" href="${rel}set/${s.slug}/pack.zip" download>⬇ 下载压缩包</a>`
+        ? `<a class="btn btn-primary side-dl" href="${rel}${self}/pack.zip" download>⬇ 下载压缩包</a>`
         : (s.hasPack && LITE
           ? `<span class="btn btn-disabled side-dl">压缩包未随站点部署</span>`
           : `<span class="btn btn-disabled side-dl">⬇ 下载链接待补充</span>`)))
@@ -874,13 +947,13 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
       </div>
       ${moreSets.length ? `<div class="side-sets">
         <p class="side-sub">${esc(s.model || s.series)} 的其他作品</p>
-        ${moreSets.map(x => `<a class="side-set" href="${rel}set/${x.slug}/index.html" title="${esc(x.title)}">
-          <span class="ss-cover">${x.coverFile
-            ? `<img loading="lazy" src="${rel}set/${x.slug}/${x.coverThumb ? 'thumbs/' + x.coverThumb + verQ(x.thumbVer[x.coverThumb]) : x.coverFile}" alt="${esc(x.title)}">`
+        ${moreSets.map(x => `<a class="side-set${x.hidden ? ' is-hidden' : ''}"${x.hidden ? ` data-hid="${esc(x.slug)}"${x.coverThumb ? ` data-cover="${esc(x.coverThumb)}"` : ''}` : ` href="${setHref(x)}"`} title="${esc(x.hidden ? '隐藏图集：' + x.title : x.title)}">
+          <span class="ss-cover">${setCoverSrc(x)
+            ? `<img loading="lazy" class="${x.hidden ? 'blurred' : ''}" src="${setCoverSrc(x)}" alt="${esc(x.title)}">`
             : ''}</span>
           <span class="ss-body">
-            <b>${esc(x.title)}</b>
-            <span class="ss-meta">${esc(x.date)} · ${x.imageCount}P${x.sizeText ? ' · ' + esc(x.sizeText) : (x.packSize ? ' · ' + esc(x.packSize) : '')}</span>
+            <b>${x.hidden ? '🔒 ' : ''}${esc(x.title)}</b>
+            <span class="ss-meta">${x.hidden ? '隐藏图集 · 输入密码查看' : `${esc(x.date)} · ${x.imageCount}P${x.sizeText ? ' · ' + esc(x.sizeText) : (x.packSize ? ' · ' + esc(x.packSize) : '')}`}</span>
           </span>
         </a>`).join('')}
       </div>` : ''}
@@ -913,8 +986,12 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
     ${streamHint}
     ${previews}
     <nav class="prevnext">
-      ${prev ? `<a class="pn" href="${rel}set/${prev.slug}/index.html"><small>上一套</small><span>${esc(prev.title)}</span></a>` : '<span class="pn dim">已是第一套</span>'}
-      ${next ? `<a class="pn" href="${rel}set/${next.slug}/index.html"><small>下一套</small><span>${esc(next.title)}</span></a>` : '<span class="pn dim">已是最后一套</span>'}
+      ${prev ? (prev.hidden
+        ? `<span class="pn locked"${prev.hiddenOk ? ` data-hid="${esc(prev.slug)}"` : ''}><small>上一套（隐藏）</small><span>🔒 ${esc(prev.title)}</span></span>`
+        : `<a class="pn" href="${setHref(prev)}"><small>上一套</small><span>${esc(prev.title)}</span></a>`) : '<span class="pn dim">已是第一套</span>'}
+      ${next ? (next.hidden
+        ? `<span class="pn locked"${next.hiddenOk ? ` data-hid="${esc(next.slug)}"` : ''}><small>下一套（隐藏）</small><span>🔒 ${esc(next.title)}</span></span>`
+        : `<a class="pn" href="${setHref(next)}"><small>下一套</small><span>${esc(next.title)}</span></a>`) : '<span class="pn dim">已是最后一套</span>'}
     </nav>
     ${related && related.length ? `<h2 class="sec-title">相关推荐</h2>
     <div class="grid related">${related.map(x => card(x, rel)).join('')}</div>` : ''}
@@ -926,11 +1003,12 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
     title: `${s.title} - ${config.siteName}`,
     desc: s.description || s.modelInfo || `${s.displayTitle}${s.tags.length ? ' · ' + s.tags.join('、') : ''}`,
     body, rel, pswp: true,
-    canonical,
+    canonical: s.hiddenOk ? '' : canonical,   // 隐藏页不加 canonical / og:url（别把私有地址写进搜索引擎）
+    noindex: s.hiddenOk,
     og: {
       type: 'article',
-      url: canonical,
-      image: s.coverFile ? pageUrl(`set/${encodeURIComponent(s.slug)}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}`) : '',
+      url: s.hiddenOk ? '' : canonical,
+      image: s.coverFile ? pageUrl(`${s.hiddenOk ? `h/${s.token}` : `set/${encodeURIComponent(s.slug)}`}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}`) : '',
     },
     jsonld: JSON.stringify({
       '@context': 'https://schema.org',
@@ -1010,6 +1088,33 @@ img{max-width:100%;display:block}
 /* 详情页标题旁的体量标签（原图总大小）＋分类页「合计」强调 */
 .tag-size{color:#4ec99a;border-color:rgba(78,201,154,.42);background:rgba(78,201,154,.10);cursor:default}
 .size-strong{color:var(--fg);font-weight:600}
+/* ── 隐藏套图：只给一张糊图，点不进去；输密码后才变成正常卡片 ── */
+.card-locked{cursor:default}
+.card-locked .card-cover{background:#0d1017}
+.card-locked .card-cover .blurred,.blurred{filter:blur(14px) saturate(.75) brightness(.85);transform:scale(1.15)}
+.card-locked .card-title{color:var(--dim)}
+.card-locked .card-meta{justify-content:space-between}
+.badge-lock{background:rgba(0,0,0,.66);color:#ffd9a0;border:1px solid rgba(255,180,84,.45)}
+.lock-hint{font-size:12px;color:var(--dim)}
+.unlock-btn{font:inherit;font-size:12px;padding:4px 12px;border-radius:999px;cursor:pointer;
+  border:1px solid rgba(255,180,84,.5);background:rgba(255,180,84,.12);color:var(--accent2);transition:.15s}
+.unlock-btn:hover{background:rgba(255,180,84,.22)}
+.card-locked.unlocked{cursor:pointer}
+.card-locked.unlocked .card-cover .blurred{filter:none;transform:none}
+.card-locked.unlocked .card-title{color:var(--fg)}
+.card-locked.unlocked .unlock-btn{border-color:var(--accent);background:rgba(91,140,255,.14);color:var(--accent)}
+.side-set.is-hidden{cursor:default;opacity:.75}
+/* 解锁后：任何位置的隐藏条目都恢复清晰、可点 */
+[data-hid].unlocked img.blurred{filter:none;transform:none}
+.side-set.is-hidden.unlocked{opacity:1;cursor:pointer}
+.pn.locked{opacity:.75}
+.pn.locked span{color:var(--dim)}
+.pn.locked.unlocked{cursor:pointer;opacity:1}
+/* 轻提示（隐藏套图解锁用） */
+.pn-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:900;
+  background:rgba(18,22,30,.97);color:#fff;border:1px solid var(--line);padding:10px 16px;border-radius:10px;
+  font-size:13px;line-height:1.6;max-width:80vw;box-shadow:0 10px 34px rgba(0,0,0,.5)}
+.pn-toast.err{border-color:rgba(255,96,96,.6)}
 /* 模特头像（后台裁剪生成，圆形）：xs 列表卡片 / sm 侧栏 / md 模特页标题 */
 .mavatar{display:inline-flex;flex:0 0 auto;border-radius:50%;overflow:hidden;background:var(--panel2);
   border:1px solid var(--line);vertical-align:middle}
@@ -1358,13 +1463,118 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
   const themeBtn = document.getElementById('themeBtn');
   if (themeBtn) themeBtn.addEventListener('click', () => setTheme(root.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
 
+  // ── 隐藏套图解锁 ──
+  // 地址 = h/<sha256(密码 + '|' + slug) 前 16 位>/，所以浏览器这边也要能算同一个哈希；
+  // 站点 HTML 里不出现这个地址，输对密码前谁也拿不到隐藏套图的页面与原图。
+  var toast = function (msg, ok) {
+    var d = document.createElement('div');
+    d.className = 'pn-toast' + (ok === false ? ' err' : '');
+    d.textContent = String(msg).slice(0, 200);
+    document.body.appendChild(d);
+    setTimeout(function () { if (d.parentNode) d.remove(); }, 2800);
+  };
+  var HN = {
+    key: 'pn-hidden-pw',
+    rel: (typeof window.PN_REL === 'string' ? window.PN_REL : ''),
+    hint: window.PN_HIDDEN_HINT || '这套图已隐藏，输入密码后查看',
+    pw: function () { try { return localStorage.getItem(HN.key) || ''; } catch (e) { return ''; } },
+    save: function (p) { try { localStorage.setItem(HN.key, p); } catch (e) {} },
+    forget: function () { try { localStorage.removeItem(HN.key); } catch (e) {} },
+  };
+  var hexBuf = function (buf) {
+    return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+  };
+  var sha16 = function (str) {
+    if (!(window.crypto && crypto.subtle)) return Promise.reject(new Error('no-subtle'));
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str))
+      .then(function (buf) { return hexBuf(buf).slice(0, 16); });
+  };
+  var urlFor = function (slug, pw) {
+    return sha16(pw + '|' + slug).then(function (tok) { return HN.rel + 'h/' + tok + '/'; });
+  };
+  // HEAD 探一下地址在不在：在＝密码对（地址由密码算出，猜不出别的可能）
+  var probe = function (url) {
+    return fetch(url, { method: 'HEAD' }).then(function (r) { return r.ok; }).catch(function () { return false; });
+  };
+  var unlockCards = function () {
+    var pw = HN.pw(); if (!pw) return;
+    var nodes = [].slice.call(document.querySelectorAll('[data-hid]'));
+    if (!nodes.length) return;
+    nodes.slice(0, 24).forEach(function (el) {
+      var slug = el.getAttribute('data-hid'); if (!slug) return;
+      urlFor(slug, pw).then(function (url) {
+        return probe(url).then(function (ok) {
+          if (!ok) { HN.forget(); return; }        // 密码改过了 → 清掉本地记忆，回到锁定状态
+          el.classList.add('unlocked');
+          el.setAttribute('data-url', url);
+          var img = el.querySelector('img.blurred');
+          var cov = el.getAttribute('data-cover');
+          if (img && cov && url) img.src = url + 'thumbs/' + cov;
+          var btn = el.querySelector('.unlock-btn');
+          if (btn) btn.textContent = '🔓 查看这套图';
+          var a = el.querySelector('a.card-link');
+          if (!a && el.tagName === 'A' && !el.getAttribute('href')) el.setAttribute('href', url);
+        });
+      });
+    });
+  };
+  var goHidden = function (slug, pw) {
+    return urlFor(slug, pw).then(function (url) {
+      return probe(url).then(function (ok) {
+        if (!ok) return false;
+        HN.save(pw);
+        location.href = url;
+        return true;
+      });
+    });
+  };
+  var askHidden = function (slug) {
+    var pw = window.prompt(HN.hint);
+    if (!pw) return;
+    toast('正在校验密码…');
+    goHidden(slug, pw).then(function (ok) {
+      if (ok) return;
+      var again = window.confirm('密码不对，重新输入？');
+      if (again) askHidden(slug);
+      else toast('已取消', false);
+    }).catch(function () { toast('当前浏览器不支持（需要 HTTPS）', false); });
+  };
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.unlock-btn');
+    if (btn) {
+      e.preventDefault(); e.stopPropagation();
+      var el = btn.closest('[data-hid]');
+      var url = el && el.getAttribute('data-url');
+      if (url) { location.href = url; return; }     // 已经解锁过：直接进
+      askHidden(btn.getAttribute('data-hid') || (el && el.getAttribute('data-hid')));
+      return;
+    }
+    var card = e.target.closest('[data-hid].unlocked');
+    if (card && !e.target.closest('a[href]')) {
+      var u = card.getAttribute('data-url');
+      if (u) location.href = u;
+    }
+  });
+  var lockBtn = document.getElementById('lockBtn');
+  if (lockBtn) lockBtn.addEventListener('click', function () {
+    var pw = window.prompt(HN.hint, HN.pw() ? '' : '');
+    if (!pw) return;
+    // 用页面上任意一个隐藏套图来验证密码；没有锁定卡片时（比如详情页）就直接记住
+    var any = document.querySelector('[data-hid]');
+    if (!any) { HN.save(pw); toast('密码已记住，回到列表即可打开隐藏图集', true); return; }
+    goHidden(any.getAttribute('data-hid'), pw).then(function (ok) { if (!ok) toast('密码不对', false); });
+  });
+  unlockCards();
+
   // ── 随便看看：从索引随机跳一套 ──
   const randBtn = document.getElementById('randomBtn');
   if (randBtn) {
     const base = (location.pathname.includes('/set/') || location.pathname.includes('/series/') || location.pathname.includes('/tag/') || location.pathname.includes('/page/')) ? '../../' : '';
     randBtn.addEventListener('click', () => {
       fetch(base + 'search-index.json').then(r => r.json()).then(d => {
-        const s = d.sets[Math.floor(Math.random() * d.sets.length)];
+        // 隐藏套图不参与"随便看看"（除非已经解锁）
+        const pool = d.sets.filter(s => !s.locked || document.querySelector('.card-locked.unlocked[data-hid="' + s.slug + '"]'));
+        const s = pool[Math.floor(Math.random() * pool.length)];
         if (s) location.href = base + 'set/' + encodeURIComponent(s.slug) + '/index.html';
       }).catch(() => {});
     });
@@ -1380,7 +1590,18 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     const base = location.pathname.includes('/page/') ? '../../' : '';
     let INDEX = null;
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const cardHtml = (s) => [
+    const cardHtml = (s) => s.locked ? [
+      '<article class="card card-locked" data-hid="' + esc(s.slug) + '" data-cover="cover.webp">',
+      '<div class="card-cover locked">',
+      (s.cover ? '<img class="blurred" loading="lazy" src="' + base + s.cover + '" alt="' + esc(s.title) + '">' : '<div class="no-cover">🔒</div>'),
+      '<span class="badge badge-lock">🔒 隐藏</span>',
+      '</div>',
+      '<h2 class="card-title">' + esc(s.title) + '</h2>',
+      '<div class="card-meta">',
+      '<button class="unlock-btn" data-hid="' + esc(s.slug) + '">🔓 输入密码查看</button>',
+      '<time>' + esc(s.date) + '</time>',
+      '</div></article>',
+    ].join('') : [
       '<article class="card">',
       '<a class="card-link" href="' + base + 'set/' + encodeURIComponent(s.slug) + '/index.html">',
       '<div class="card-cover">',
@@ -1980,8 +2201,9 @@ function build() {
   const slugs = readdirSync(SETS_DIR).filter(name => statSync(join(SETS_DIR, name)).isDirectory())
   const sets = slugs.map(readSet).filter(Boolean)
     .sort((a, b) => cmpDateDesc(a, b))
+  hiddenCountGlobal = sets.filter(s => s.hiddenOk).length
   // 置顶推荐（列表页顶部轮播）：按 pinOrder 升序，没填的排在后面并按日期
-  const pinnedSets = sets.filter(s => s.pinned)
+  const pinnedSets = sets.filter(s => s.pinned && !s.hidden)
     .sort((a, b) => (a.pinOrder || 9999) - (b.pinOrder || 9999) || cmpDateDesc(a, b))
   if (!sets.length) console.warn('! sets/ 下没有有效图集（每个图集目录需含 meta.json）')
   // ★ 先把样式/脚本落盘：后面复制缩略图要花几十秒，万一构建被打断（关掉后台、重启进程等），
@@ -2010,8 +2232,13 @@ function build() {
 
   // 详情页 + 资源
   let deployedThumbCount = 0
+  const hiddenNoPw = sets.filter(s => s.hidden && !s.hiddenOk).map(s => s.slug)
+  if (hiddenNoPw.length) console.warn(`! 这些图集勾了隐藏但没配密码（构建时会被当成无入口的糊图）：${hiddenNoPw.join('、')}`)
+  let hiddenCount = 0
   sets.forEach((s, i) => {
-    const outDir = join(DIST, 'set', s.slug)
+    // 隐藏套图写到 h/<token>/ 下：地址由密码算出，公开的目录里找不到它
+    const outDir = join(DIST, ...(s.hiddenOk ? ['h', s.token] : ['set', s.slug]))
+    if (s.hiddenOk) hiddenCount++
     mkdirSync(outDir, { recursive: true })
     const related = relatedSets(s, sets)
     // 模特的其他作品（侧栏推荐）：同系列优先，再按日期倒序，取 5 套
@@ -2021,7 +2248,8 @@ function build() {
       const sb = (s.series && b.series === s.series) ? 0 : 1
       return sa - sb || String(b.date || '').localeCompare(String(a.date || ''))
     }).slice(0, config.modelSideCount || 5)
-    writeFileSync(join(outDir, 'index.html'), detailPage(s, sets[i - 1], sets[i + 1], pageUrl(`set/${encodeURIComponent(s.slug)}/`), related, byTag, moreSets, sameModel.length + 1))
+    const detailUrl = s.hiddenOk ? pageUrl(`h/${s.token}/`) : pageUrl(`set/${encodeURIComponent(s.slug)}/`)
+    writeFileSync(join(outDir, 'index.html'), detailPage(s, sets[i - 1], sets[i + 1], detailUrl, related, byTag, moreSets, sameModel.length + 1))
 
     // 预览图（原图；精简模式下不复制，改用缩略图作为大图）
     const imgOut = join(outDir, 'images')
@@ -2046,6 +2274,18 @@ function build() {
     if (s.coverFile) copyFileSync(join(s.dir, s.coverFile), join(outDir, s.coverFile))
     if (s.bannerFile && s.bannerFile !== s.coverFile) copyFileSync(join(s.dir, s.bannerFile), join(outDir, s.bannerFile))
   })
+
+  // 公开的模糊小图（锁定卡片用）：放 dist/blur/<slug>.webp，谁都能取，但只有 24px 色块
+  const blurOut = join(DIST, 'blur')
+  const blurSets = sets.filter(s => s.hidden && (s.blurThumb || s.blurFile))
+  if (blurSets.length) {
+    mkdirSync(blurOut, { recursive: true })
+    blurSets.forEach(s => {
+      const src = s.blurThumb ? join(s.dir, 'thumbs', s.blurThumb) : join(s.dir, s.blurFile)
+      copyFileSync(src, join(blurOut, `${s.slug}.webp`))
+    })
+  }
+  if (hiddenCount) console.log(`  隐藏套图 ${hiddenCount} 套 → h/<密码算出的地址>/（公开目录里查不到）`)
 
   // ── 系列页 / 标签页（静态化，SEO 友好）──
   mkdirSync(join(DIST, 'series'), { recursive: true })
@@ -2167,15 +2407,20 @@ function build() {
 
   // 资源与索引（CSS/JS 在构建开头就已写过一次，这里复写一次保证内容是最新的）
   writeAssets()
+  // 隐藏套图：索引里只给 slug + 标题 + 模糊小图（不给任何真实路径），前端渲染成"锁定卡片"
   writeFileSync(join(DIST, 'search-index.json'), JSON.stringify({
     count: sets.length,
     generatedAt: new Date().toISOString(),
     sets: sets.map(s => ({
       slug: s.slug, title: s.title, displayTitle: s.displayTitle,
       series: s.series, model: s.model, date: s.date, addedAt: s.addedAt, tags: s.tags,
-      imageCount: s.imageCount, packSize: s.packSize, size: s.sizeText, bytes: s.bytes,
-      pinned: !!s.pinned, pinOrder: s.pinOrder || 0,
-      cover: s.coverThumb ? `set/${s.slug}/thumbs/${s.coverThumb}${verQ(s.thumbVer[s.coverThumb])}` : (s.coverFile ? `set/${s.slug}/${s.coverFile}` : ''),
+      imageCount: s.hidden ? 0 : s.imageCount, packSize: s.hidden ? '' : s.packSize,
+      size: s.hidden ? '' : s.sizeText, bytes: s.hidden ? 0 : s.bytes,
+      pinned: !!s.pinned && !s.hidden, pinOrder: s.pinOrder || 0,
+      locked: !!s.hidden,
+      cover: s.hidden
+        ? (s.blurThumb || s.blurFile ? `blur/${s.slug}.webp` : '')
+        : (s.coverThumb ? `set/${s.slug}/thumbs/${s.coverThumb}${verQ(s.thumbVer[s.coverThumb])}` : (s.coverFile ? `set/${s.slug}/${s.coverFile}` : '')),
     })),
   }, null, 2))
   writeFileSync(join(DIST, '.nojekyll'), '')
@@ -2191,7 +2436,7 @@ function build() {
     { loc: pageUrl('about.html'), lastmod: '', pri: '0.3' },
     ...(config.privacy ? [{ loc: pageUrl('privacy.html'), lastmod: '', pri: '0.3' }] : []),
     ...Object.entries(byModel).map(([n, l]) => ({ loc: pageUrl(`model/${encodeURIComponent(n)}.html`), lastmod: l.map(s => s.date || '').sort().pop() || '', pri: '0.7' })),
-    ...sets.map(s => ({ loc: pageUrl(`set/${encodeURIComponent(s.slug)}/index.html`), lastmod: s.date, pri: '0.8' })),
+    ...sets.filter(s => !s.hidden).map(s => ({ loc: pageUrl(`set/${encodeURIComponent(s.slug)}/index.html`), lastmod: s.date, pri: '0.8' })),
     ...Object.entries(bySeries).map(([n, l]) => ({ loc: pageUrl(`series/${encodeURIComponent(n)}.html`), lastmod: l[0]?.date || '', pri: '0.5' })),
     ...Object.entries(byTag).map(([n, l]) => ({ loc: pageUrl(`tag/${encodeURIComponent(n)}.html`), lastmod: l[0]?.date || '', pri: '0.5' })),
   ]
@@ -2202,7 +2447,7 @@ function build() {
   const rssDate = (d) => { try { return new Date(d + 'T00:00:00Z').toUTCString() } catch { return new Date().toUTCString() } }
   writeFileSync(join(DIST, 'feed.xml'),
     `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>\n<title>${esc(config.siteName)}</title>\n<link>${esc(base || '/')}</link>\n<description>${esc(config.siteSubtitle)}</description>\n`
-    + sets.slice(0, 30).map(s => `  <item>\n    <title>${esc(s.title)}</title>\n    <link>${esc(pageUrl(`set/${encodeURIComponent(s.slug)}/index.html`))}</link>\n    <guid>${esc(pageUrl(`set/${encodeURIComponent(s.slug)}/index.html`))}</guid>\n    <pubDate>${rssDate(s.date)}</pubDate>\n    <description>${esc(s.description || s.tags.join('、'))}</description>\n  </item>`).join('\n')
+    + sets.filter(s => !s.hidden).slice(0, 30).map(s => `  <item>\n    <title>${esc(s.title)}</title>\n    <link>${esc(pageUrl(`set/${encodeURIComponent(s.slug)}/index.html`))}</link>\n    <guid>${esc(pageUrl(`set/${encodeURIComponent(s.slug)}/index.html`))}</guid>\n    <pubDate>${rssDate(s.date)}</pubDate>\n    <description>${esc(s.description || s.tags.join('、'))}</description>\n  </item>`).join('\n')
     + `\n</channel></rss>\n`)
 
   // ★ 全部写完 → 原子切换到 dist/（构建中途失败时访客读到的还是上一版完整站点）
