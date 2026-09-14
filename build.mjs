@@ -1114,7 +1114,10 @@ img{max-width:100%;display:block}
 .detail-side::-webkit-scrollbar{width:6px}
 .detail-side::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
 .detail-side::-webkit-scrollbar-track{background:transparent}
-.detail-side.side-tall{position:static;max-height:none;overflow:visible}
+/* 侧栏比屏幕高时：不做内嵌滚动条，改成"底部吸附"——
+   页面往下滚时侧栏整体跟着走，等它的底边贴到视口底部就停住，
+   于是从上往下滚一遍就能看完整栏，之后它一直留在视野里（参考同类站的做法）。 */
+.detail-side.side-tall{position:sticky;top:var(--side-top,80px);max-height:none;overflow:visible}
 .side-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
 .side-title{margin:0 0 10px;font-size:14px;font-weight:600;color:var(--accent2)}
 .side-dl-wrap{margin:0 0 8px}
@@ -1162,6 +1165,7 @@ html[data-theme="light"] .pf-quote.side-quote{background:linear-gradient(90deg,r
 @media (max-width:1000px){
   .detail-layout{flex-direction:column;gap:18px}
   .detail-side{position:static;width:100%;flex:none;max-height:none;overflow:visible}
+  .detail-side.side-tall{position:static;top:auto}   /* 手机端侧栏在正文下方，不做吸附 */
   body:has(.mobile-dl-bar:not([hidden])) .side-box:first-child{display:none}  /* 下载已在底部固定条里 */
   body:has(.mobile-dl-bar:not([hidden])){padding-bottom:76px}
   .mobile-dl-bar:not([hidden]){display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;
@@ -1710,7 +1714,19 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
   // 详情页侧栏：内容比屏幕高时不再吸顶（避免嵌套滚动条），跟着页面一起滚
   const sideEl = document.querySelector('.detail-side');
   if (sideEl) {
-    const fitSide = () => sideEl.classList.toggle('side-tall', sideEl.scrollHeight > window.innerHeight - 120);
+    // 侧栏高于视口时用"底部吸附"：算出负的 top，让它的底边停在视口底部上方 20px；
+    // 这样滚动时整栏跟着走、滚完就钉住，既没有内嵌滚动条，信息也一直在视野里。
+    const fitSide = () => {
+      const h = sideEl.scrollHeight;
+      const vh = window.innerHeight;
+      if (h > vh - 120) {
+        sideEl.style.setProperty('--side-top', Math.round(vh - h - 20) + 'px');
+        sideEl.classList.add('side-tall');
+      } else {
+        sideEl.classList.remove('side-tall');
+        sideEl.style.removeProperty('--side-top');
+      }
+    };
     fitSide();
     window.addEventListener('resize', fitSide);
     window.addEventListener('load', () => setTimeout(fitSide, 80));
