@@ -248,8 +248,11 @@ function readSet(slug) {
   // 缩略图版本戳：文件变了 URL 就变，避免读到旧缓存
   const thumbVer = {}
   for (const f of [...thumbs, coverThumb].filter(Boolean)) thumbVer[f] = fileVer(join(dir, 'thumbs', f))
+  // 模糊占位图（LQIP）：只内联前 N 张（默认 12）——整套图都展示时，几百张的 base64 会把 HTML 撑到几百 KB，
+  // 而布局高度是构建时按 data-ratio 算好的，后面的图没有占位也不会跳动。
   const lqip = {}
-  for (const f of images) {
+  const lqipMax = Number(config.lqipCount ?? 12)
+  for (const f of (lqipMax > 0 ? images.slice(0, lqipMax) : images)) {
     const p = join(dir, 'thumbs', f.replace(/\.[^.]+$/, '.lqip.jpg'))
     if (existsSync(p)) lqip[f] = 'data:image/jpeg;base64,' + readFileSync(p).toString('base64')
   }
@@ -317,7 +320,11 @@ function readSet(slug) {
     profile: { ...modelProfile(model), ...(meta.profile || {}) },
     openlistDir: meta.openlistDir || '',
     sizes: Object.fromEntries(images.map(f => [f, imageSize(join(dir, 'images', f))])),
-    previews: images.slice(0, meta.previewCount || config.previewCount),
+    // 预览图：默认展示整套（缩略图已全部生成，页面上按需懒加载）；某套想限制数量就在它的 meta.json 里写 previewCount
+    previews: (() => {
+      const want = meta.previewCount !== undefined ? Number(meta.previewCount) : Number(config.previewCount)
+      return (!want || want <= 0) ? images : images.slice(0, want)
+    })(),
   }
   // 没有本地压缩包、也没手填外链时，用 OpenList 目录兜底当下载入口
   out.olDir = olDirUrl(out)
@@ -651,7 +658,7 @@ function modelsIndexPage(byModel, allSets) {
     const pf = modelProfile(name)
     const latest = list.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0]
     const b = list.reduce((n, s) => n + (s.bytes || 0), 0)
-    const chips = [pf.height, pf.style, pf.city].filter(Boolean).slice(0, 2)
+    const chips = [pf.birth, pf.height, pf.style, pf.city].filter(Boolean).slice(0, 3)
       .map(v => `<span class="tag">${esc(v)}</span>`).join('')
     return `<article class="card">
     <a class="card-link" href="model/${encodeURIComponent(name)}.html">
@@ -665,8 +672,8 @@ function modelsIndexPage(byModel, allSets) {
       <h2 class="card-title">👤 ${esc(name)}</h2>
     </a>
     <div class="card-meta">
-      ${chips}
-      <time datetime="${esc(latest ? latest.date : '')}">${pf.birth ? esc(pf.birth) + ' · ' : ''}最新 ${esc(latest ? latest.date : '')}</time>
+      <span class="card-chips">${chips}</span>
+      <time datetime="${esc(latest ? latest.date : '')}">最新 ${esc(latest ? latest.date : '')}</time>
     </div>
   </article>`
   }).join('')
@@ -783,8 +790,8 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
           ? `<span class="btn btn-disabled side-dl">压缩包未随站点部署</span>`
           : `<span class="btn btn-disabled side-dl">⬇ 下载链接待补充</span>`)))
   const hasDlTarget = !!(s.olDir || s.downloadUrl || s.hasPack)
+  // 只显示"提取码 / 解压密码"这类真正需要的信息；网盘名字（如「夸克网盘」）不再展示
   const dlCodes = [
-    hasDlTarget && s.netdisk ? `网盘：${esc(s.netdisk)}` : '',
     hasDlTarget && s.shareCode ? `提取码 <code>${esc(s.shareCode)}</code>` : '',
     hasDlTarget && s.password ? `解压密码 <code>${esc(s.password)}</code>` : '',
   ].filter(Boolean)
@@ -827,7 +834,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
         ${s.resolution ? `<dt>图片像素</dt><dd>${esc(s.resolution)}</dd>` : ''}
         ${s.sizeText ? `<dt>总大小</dt><dd>${esc(s.sizeText)}<span class="dim"> · 单张约 ${esc(fmtSize(Math.round(s.bytes / Math.max(1, s.imageCount))))}</span></dd>` : ''}
         ${s.packSize ? `<dt>压缩包</dt><dd>${esc(s.packSize)}</dd>` : ''}
-        ${s.netdisk || !hasDlTarget ? `<dt>${s.olDir ? '原图存放' : '下载方式'}</dt><dd>${hasDlTarget && s.netdisk ? esc(s.netdisk) : '<span class="dim">暂未提供下载</span>'}</dd>` : ''}
+        ${s.olDir ? `<dt>原图存放</dt><dd>${esc(s.netdisk || 'OpenList')}</dd>` : ''}
         <dt>发布时间</dt><dd>${esc(s.date)}</dd>
         ${s.password ? `<dt>解压密码</dt><dd><code>${esc(s.password)}</code></dd>` : ''}
       </dl>
@@ -948,6 +955,9 @@ img{max-width:100%;display:block}
 .card-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:0 12px 12px;font-size:12px;color:var(--dim)}
 /* 日期固定单独占一行右对齐：标签多少不一，若跟着标签排会出现"有的同行、有的换行" */
 .card-meta time{flex:1 0 100%;margin:0;text-align:right}
+/* 模特卡：资料标签区固定成"一行标签"的高度（24.4px = 12px 标签 + 内边距 + 边框），
+   这样有资料和没资料的两张卡，日期行也会落在同一条基线上 */
+.card-chips{display:flex;flex-wrap:wrap;gap:6px;min-height:24.4px;flex:1 0 100%;align-items:center;overflow:hidden}
 .tag{padding:1px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);color:var(--dim);font-size:12px;text-decoration:none;display:inline-block;transition:.15s}
 .tag-series{color:var(--accent);border-color:rgba(91,140,255,.4)}
 /* 详情页标题旁的体量标签（原图总大小）＋分类页「合计」强调 */
@@ -1068,6 +1078,9 @@ img{max-width:100%;display:block}
   opacity:0;pointer-events:none;
   transition:transform .45s cubic-bezier(.22,.61,.36,1),opacity .45s ease,width .3s ease,height .3s ease;will-change:transform,width,height}
 .preview.placed{opacity:1;pointer-events:auto}
+/* 首次排版禁用过渡：否则瓦片是从 (0,0) 动画移到目标位置的，懒加载观察器会在动画起点
+   读到"所有瓦片都在顶部"，于是把整套缩略图一次性下载。之后（窗口缩放等）恢复动画。 */
+.previews.no-anim .preview{transition:none}
 /* 图片加载失败占位 */
 .preview.failed{background:var(--panel2)}
 .preview.failed::before{content:'⚠ 图片加载失败';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:13px}
@@ -1579,9 +1592,10 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       return rows;
     };
 
-    const layout = () => {
+    const layout = (instant) => {
       W = gallery.clientWidth || gallery.parentElement.clientWidth;
       if (!items.length || !W) return;
+      if (instant || !ioStarted) gallery.classList.add('no-anim');
       const rows = splitRows();
       let y = 0;
       rows.forEach(r => {
@@ -1602,6 +1616,12 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         y += h + GAP;
       });
       gallery.style.height = Math.max(0, y - GAP) + 'px';
+      // 等两帧：让禁用动画后的最终位置提交给浏览器，再恢复过渡并开始懒加载观察。
+      // （观察器若在动画/旧几何下启动，会把整页瓦片都当成"在视口里"，一次性下载全部缩略图）
+      if (!ioStarted) requestAnimationFrame(() => requestAnimationFrame(() => {
+        gallery.classList.remove('no-anim');
+        startLoading();
+      }));
     };
 
     // 图片加载：懒加载 + WebP 失败回退 JPG；只负责显示，不再改变落位（避免布局抖动）
@@ -1639,16 +1659,40 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       attempt(img.dataset.src || img.src);
     };
 
-    layout();
+    // 懒加载观察器：必须等"排好版"之后再观察。
+    // 否则首次 layout() 时容器宽度还是 0（样式未就绪）→ 所有瓦片都堆在左上角 →
+    // 观察器以为整页都在视口里，一口气把几十上百张缩略图全下载了。
+    let ioStarted = false;
+    const startLoading = () => {
+      if (ioStarted || !items.length) return;
+      ioStarted = true;
+      if ('IntersectionObserver' in window) {
+        const io = new IntersectionObserver((entries) => {
+          entries.forEach(e => { if (e.isIntersecting) { loadOne(e.target); io.unobserve(e.target); } });
+        }, { rootMargin: '400px 0px' });
+        items.forEach(el => io.observe(el));
+        // 兜底：快速滚动/直接跳转时，中间的瓦片可能一帧之间就被划过去了，
+        // 观察器不会为它们触发 → 这里在滚动停止后把"已经滚过"的补上（不预加载下方未看到的）
+        let st = null;
+        window.addEventListener('scroll', () => {
+          if (st) return;
+          st = setTimeout(() => {
+            st = null;
+            const limit = window.scrollY + window.innerHeight + 400;
+            items.forEach(el => {
+              if (el.dataset.done) return;
+              const r = el.getBoundingClientRect();
+              if (r.top + window.scrollY < limit) loadOne(el);
+            });
+          }, 180);
+        }, { passive: true });
+      } else {
+        items.forEach(loadOne);
+      }
+    };
 
-    if ('IntersectionObserver' in window) {
-      const io = new IntersectionObserver((entries) => {
-        entries.forEach(e => { if (e.isIntersecting) { loadOne(e.target); io.unobserve(e.target); } });
-      }, { rootMargin: '500px 0px' });
-      items.forEach(el => io.observe(el));
-    } else {
-      items.forEach(loadOne);
-    }
+    // 首次排版（成功的话 layout() 内部会启动懒加载观察；失败则等 load 事件重排后再启动）
+    layout();
 
     // 尺寸变化 → 用同一套算法重排（结果可预期）
     let rt = null;

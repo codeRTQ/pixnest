@@ -3,7 +3,7 @@
   "siteSubtitle": "高质量写真图集 · 每日更新",
   "baseUrl": "",
   "setsPerPage": 12,
-  "previewCount": 8,
+  "previewCount": 0,
   "icp": "",
   "openlist": null,
   "adultGate": true,
@@ -13,5 +13,6 @@
   "previewRowTarget": 460,
   "previewRowMax": 3,
   "heroRatio": "32/9",
-  "heroMaxHeight": 320
+  "heroMaxHeight": 320,
+  "lqipCount": 12
 }
