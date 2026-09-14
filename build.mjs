@@ -534,6 +534,7 @@ const card = (s, rel = '') => (s.hidden && !s.hiddenOk)
   <h2 class="card-title">${esc(s.title)}</h2>
   <div class="card-meta">
     <button class="unlock-btn" data-hid="${esc(s.slug)}" title="${esc(HIDDEN_HINT)}">🔓 输入密码查看</button>
+    ${s.dupTag ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
     <time datetime="${esc(s.date)}">${esc(s.date)}</time>
   </div>
 </article>`
@@ -551,6 +552,7 @@ const card = (s, rel = '') => (s.hidden && !s.hiddenOk)
     <h2 class="card-title">${esc(s.title)}</h2>
   </a>
   <div class="card-meta">
+    ${s.dupTag ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
     ${s.series ? `<a class="tag tag-series" href="${rel}series/${encodeURIComponent(s.series)}.html" title="查看该系列全部图集">${esc(s.series)}</a>` : ''}
     ${s.tags.slice(0, 2).map(t => `<a class="tag tag-link" href="${rel}tag/${encodeURIComponent(t)}.html" title="查看同标签图集">${esc(t)}</a>`).join('')}
     <time datetime="${esc(s.date)}">${esc(s.date)}</time>
@@ -1598,6 +1600,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       '</div>',
       '<h2 class="card-title">' + esc(s.title) + '</h2>',
       '<div class="card-meta">',
+      (s.dupTag ? '<span class="tag tag-model" title="同名作品，用它区分">' + esc(s.dupTag) + '</span>' : ''),
       '<button class="unlock-btn" data-hid="' + esc(s.slug) + '">🔓 输入密码查看</button>',
       '<time>' + esc(s.date) + '</time>',
       '</div></article>',
@@ -1613,6 +1616,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       '<h2 class="card-title">' + esc(s.title) + '</h2>',
       '</a>',
       '<div class="card-meta">',
+      (s.dupTag ? '<span class="tag tag-model" title="同名作品，用它区分">' + esc(s.dupTag) + '</span>' : ''),
       (s.series ? '<a class="tag tag-series" href="' + base + 'series/' + encodeURIComponent(s.series) + '.html">' + esc(s.series) + '</a>' : ''),
       (s.tags || []).slice(0, 2).map(t => '<a class="tag tag-link" href="' + base + 'tag/' + encodeURIComponent(t) + '.html">' + esc(t) + '</a>').join(''),
       '<time>' + esc(s.date) + '</time>',
@@ -2202,6 +2206,21 @@ function build() {
   const sets = slugs.map(readSet).filter(Boolean)
     .sort((a, b) => cmpDateDesc(a, b))
   hiddenCountGlobal = sets.filter(s => s.hiddenOk).length
+  // 同名作品（不同模特 / 不同系列拍同一主题）很常见：给它们标一个**真能区分开**的标签 ——
+  // 模特都不重样就用模特，模特重样但系列不重样就用系列，两者都重样才用「模特·系列」
+  const titleGroups = {}
+  sets.forEach(s => { const t = (s.title || '').trim(); (titleGroups[t] = titleGroups[t] || []).push(s) })
+  Object.values(titleGroups).forEach(list => {
+    if (list.length < 2) return
+    const allUnique = (key) => new Set(list.map(x => String(x[key] || '').trim())).size === list.length
+    const useModel = allUnique('model'), useSeries = allUnique('series')
+    list.forEach(x => {
+      x.dupTitle = true
+      x.dupTag = useModel ? (x.model || '')
+        : useSeries ? (x.series || '')
+          : (x.model && x.series ? `${x.model}·${x.series}` : (x.model || x.series || x.slug))
+    })
+  })
   // 置顶推荐（列表页顶部轮播）：按 pinOrder 升序，没填的排在后面并按日期
   const pinnedSets = sets.filter(s => s.pinned && !s.hidden)
     .sort((a, b) => (a.pinOrder || 9999) - (b.pinOrder || 9999) || cmpDateDesc(a, b))
@@ -2418,6 +2437,7 @@ function build() {
       size: s.hidden ? '' : s.sizeText, bytes: s.hidden ? 0 : s.bytes,
       pinned: !!s.pinned && !s.hidden, pinOrder: s.pinOrder || 0,
       locked: !!s.hidden,
+      dupTag: s.dupTag || '',
       cover: s.hidden
         ? (s.blurThumb || s.blurFile ? `blur/${s.slug}.webp` : '')
         : (s.coverThumb ? `set/${s.slug}/thumbs/${s.coverThumb}${verQ(s.thumbVer[s.coverThumb])}` : (s.coverFile ? `set/${s.slug}/${s.coverFile}` : '')),

@@ -121,10 +121,34 @@ def slugify(s: str) -> str:
     return re.sub(r'-{2,}', '-', s).strip('-') or 'set'
 
 
-def unique_slug(base):
-    """目录名已被占用时自动加 -2 / -3 …（同名作品＝两套独立图集，不互相覆盖）"""
+def unique_slug(base, model='', series=''):
+    """目录名已被占用时给个不冲突的新名字。
+
+    同名作品很常见（不同模特 / 不同系列拍同一个主题）。这时**优先用"确实不一样"的那个**接上去：
+      同标题不同模特 → `2026-09-14-油菜花-许岚LAN`
+      同标题同模特、不同系列 → `2026-09-14-油菜花-夏日晚风`
+      两者都一样（真的是同名同人同系列）→ 才退回 `-2`
+    这样目录名一眼能看出是哪一套，也比无意义的 -2 好找。
+    """
     if not os.path.isdir(os.path.join(SETS_DIR, base)):
         return base
+    try:
+        old = read_meta(os.path.join(SETS_DIR, base))
+    except Exception:  # noqa
+        old = {}
+    tags = []
+    for val, key in ((model, 'model'), (series, 'series')):
+        v = str(val or '').strip()
+        if v and v != str(old.get(key) or '').strip():
+            tags.append(v)
+    # slug 片段保留大小写（许岚LAN 别变成 许岚lan），只清掉不适合做目录名的字符
+    def frag(x):
+        x = re.sub(r'[^\w\u4e00-\u9fff-]+', '-', str(x or '').strip())
+        return re.sub(r'-{2,}', '-', x).strip('-')
+    for t in tags:
+        f = frag(t)
+        if f and not os.path.isdir(os.path.join(SETS_DIR, f'{base}-{f}')):
+            return f'{base}-{f}'
     for i in range(2, 500):
         cand = f'{base}-{i}'
         if not os.path.isdir(os.path.join(SETS_DIR, cand)):
@@ -226,17 +250,26 @@ def ensure_thumbs(set_dir: str, force=False):
 
 
 def set_signature(set_dir):
-    """图集内容指纹：图片张数 + 各文件大小（秒级，不用读内容）"""
+    """图集内容指纹：图片张数 + 各文件大小 + 首张图前 64KB 的内容哈希
+
+    只看张数和大小会把「尺寸相同、大小恰好一样」的不同图集误判成完全重复，
+    所以再掺一段真实内容（读 64KB 很快，整套图集比对仍是秒级）。"""
     img_dir = os.path.join(set_dir, 'images')
     if not os.path.isdir(img_dir):
         return ''
-    sizes = []
-    for f in os.listdir(img_dir):
-        if os.path.splitext(f)[1].lower() in IMG_EXT:
-            sizes.append(os.path.getsize(os.path.join(img_dir, f)))
-    if not sizes:
+    names = [f for f in os.listdir(img_dir) if os.path.splitext(f)[1].lower() in IMG_EXT]
+    if not names:
         return ''
-    return hashlib.md5((str(len(sizes)) + '|' + ','.join(map(str, sorted(sizes)))).encode()).hexdigest()
+    names.sort()
+    sizes = [os.path.getsize(os.path.join(img_dir, f)) for f in names]
+    sample = b''
+    try:
+        with open(os.path.join(img_dir, names[0]), 'rb') as fh:
+            sample = fh.read(65536)
+    except Exception:  # noqa
+        pass
+    key = str(len(sizes)) + '|' + ','.join(map(str, sorted(sizes))) + '|' + hashlib.md5(sample).hexdigest()
+    return hashlib.md5(key.encode()).hexdigest()
 
 
 def find_duplicate_sets(set_dir, exclude_slug=''):
@@ -1755,19 +1788,37 @@ def parse_link_lines(text, default_netdisk=''):
 
 
 def match_set(keyword, sets):
-    """按关键词找图集：目录名精确 > 标题/目录名包含 > 编号匹配"""
+    """按关键词找图集：目录名精确 > 标题/目录名/模特/系列包含 > 用模特·系列消歧 > 编号匹配
+
+    同名作品（不同模特或不同系列）很多时，允许写成「标题 模特」或「标题/系列」来精确指定。
+    """
     kw = (keyword or '').strip().lower()
     if not kw:
         return None, 'empty'
     for s in sets:
         if s['slug'].lower() == kw:
             return s, 'exact'
-    hits = [s for s in sets
-            if kw in (s['meta'].get('title') or '').lower() or kw in s['slug'].lower()]
+
+    def hay(s):
+        m = s['meta']
+        return ' '.join([str(m.get('title') or ''), s['slug'], str(m.get('model') or ''),
+                         str(m.get('series') or '')]).lower()
+
+    tokens = [t for t in re.split(r'[\s,，/|、]+', kw) if t]
+    hits = [s for s in sets if all(t in hay(s) for t in tokens)] if len(tokens) > 1 \
+        else [s for s in sets if kw in hay(s)]
     if len(hits) == 1:
         return hits[0], 'ok'
     if len(hits) > 1:
-        # 多个命中时，优先「编号完全相同」的那个（NO.001 / no-001 / 001）
+        # ① 模特名 / 系列名正好等于某个词 → 用它消歧（例：「油菜花 措措」）
+        dis = [s for s in hits
+               if str(s['meta'].get('model') or '').strip().lower() in tokens
+               or str(s['meta'].get('series') or '').strip().lower() in tokens]
+        if len(dis) == 1:
+            return dis[0], 'ok'
+        if len(dis) > 1:
+            hits = dis
+        # ② 优先「编号完全相同」的那个（NO.001 / no-001 / 001）
         num = re.search(r'\d+', kw)
         if num:
             n = int(num.group())
@@ -1776,7 +1827,11 @@ def match_set(keyword, sets):
                     or re.search(r'no[.\-_ ]?0*%d(?:\D|$)' % n, (s['meta'].get('title') or '').lower())]
             if len(same) == 1:
                 return same[0], 'ok'
-        return None, f'匹配到 {len(hits)} 套，请写更精确的关键词'
+        _names = '、'.join(f'{s["slug"]}'
+                          + (f'（{s["meta"].get("model") or s["meta"].get("series")}）'
+                             if (s['meta'].get('model') or s['meta'].get('series')) else '')
+                          for s in hits[:4])
+        return None, f'匹配到 {len(hits)} 套：{_names} —— 请写更精确的关键词（可加模特名或系列名）'
     return None, '没找到匹配的图集'
 
 
@@ -3630,7 +3685,7 @@ class Handler(BaseHTTPRequestHandler):
         # （原来会直接合并进同一个目录：第二套的图片被追加到第一套里、标题被覆盖 —— 很难发现）
         renamed_from = ''
         if not custom_slug:
-            uniq = unique_slug(slug)
+            uniq = unique_slug(slug, g('model'), g('series'))
             if uniq != slug:
                 renamed_from, slug = slug, uniq
         set_dir = os.path.join(SETS_DIR, slug)
@@ -3730,18 +3785,25 @@ class Handler(BaseHTTPRequestHandler):
 
         # 与全库比对：内容与别的图集完全相同 → 提醒（常见于重复导入同一套图）
         dup_sets = find_duplicate_sets(set_dir, exclude_slug=slug)
-        same_title = [s['slug'] for s in list_sets()
-                      if s['slug'] != slug and (s['meta'].get('title') or '').strip() == title.strip()]
+        same_title = []
+        for s in list_sets():
+            if s['slug'] == slug:
+                continue
+            if (s['meta'].get('title') or '').strip() != title.strip():
+                continue
+            _tag = s['meta'].get('model') or s['meta'].get('series') or ''
+            same_title.append(f'{s["slug"]}（{_tag}）' if _tag else s['slug'])
         dup_warn = ''
         if renamed_from:
-            dup_warn += (f'ℹ️ 已有同名同日期的图集（目录 {renamed_from}）→ 这套自动存成独立目录 {slug}\n'
-                         f'   两套内容是分开的，各自可单独编辑 / 隐藏；想让标题也能区分，可在编辑页改标题。\n')
+            _why = '（用模特名/系列名区分）' if slug != f'{renamed_from}-2' else ''
+            dup_warn += (f'ℹ️ 已有同名同日期的图集（目录 {renamed_from}）→ 这套自动存成独立目录 {slug}{_why}\n'
+                         f'   两套内容是分开的，各自可单独编辑 / 隐藏 / 设密码。\n')
         if dup_sets:
             dup_warn += (f'⚠️ 这套图集的内容与已有图集完全相同：{", ".join(dup_sets)}\n'
                          f'   如果只是重复导入，可到后台删掉其中一套（列表卡片右下角「删除」）。\n')
         elif same_title:
-            dup_warn += (f'ℹ️ 另有同名图集（标题相同、内容不同）：{", ".join(same_title)}\n'
-                         f'   同名是允许的，两套会各自显示；需要的话在编辑页把标题改得更好区分。\n')
+            dup_warn += (f'ℹ️ 另有同名图集（标题相同、内容不同）：{"、".join(same_title)}\n'
+                         f'   同名允许：站上会按模特/系列分别标注、各显示一张卡；批量填网盘链接时用「标题+模特」即可精确指定。\n')
 
         if g('norebuild') in ('1', 'on', 'true'):
             # 批量导入：不逐套重建（前端在全部完成后统一调一次 /rebuild），直接回 JSON
