@@ -39,6 +39,10 @@ PORT = int(os.environ.get('ADMIN_PORT', '8091'))
 PREVIEW_LONG = 1920   # 详情页预览缩略图【长边】上限（横竖构图总像素相近：竖 1280×1920 / 横 1920×1280）
 LQIP_W = 20           # 模糊占位图宽度
 COVER_W, COVER_H = 800, 1067   # 封面（列表卡片 2x 屏清晰）
+# 首页置顶轮播的自定义 Banner（在后台从"本套图"里选一张裁剪）与模特头像（从该模特任意一套图里选）
+# 都按 2x 屏生成，实际显示尺寸分别约 840×240（32:9）与 38~64px 圆形
+BANNER_W, BANNER_H = 1600, 450
+AVATAR_PX = 320
 THUMB_Q = 88          # JPEG 质量
 WEBP_Q = 86           # WebP 质量（同质量下体积更小）
 # 缩略图并发生成线程数：Pillow 在解码/编码时会释放 GIL，多线程能实打实提速
@@ -60,6 +64,19 @@ try:
 except Exception:  # noqa
     _SITE_CFG = {}
 SITE_VISION = (_SITE_CFG.get('vision') or {}) if isinstance(_SITE_CFG, dict) else {}
+# site.json 可覆盖 Banner / 头像输出尺寸："bannerSize": "1600x450"、"avatarSize": 320
+try:
+    _bs = str((_SITE_CFG or {}).get('bannerSize') or '').lower().split('x')
+    if len(_bs) == 2:
+        BANNER_W, BANNER_H = max(200, int(_bs[0])), max(80, int(_bs[1]))
+except Exception:  # noqa
+    pass
+try:
+    _av = int((_SITE_CFG or {}).get('avatarSize') or 0)
+    if _av >= 64:
+        AVATAR_PX = _av
+except Exception:  # noqa
+    pass
 # 项目内的 vision.json（已加入 .gitignore，专门放 key，不会被提交/推送）
 try:
     _LOCAL_VISION = json.load(open(os.path.join(ROOT, 'vision.json'), encoding='utf-8'))
@@ -1030,6 +1047,12 @@ table.lk tr.bad td{color:#ff8a8a}
 .crop-stage img{max-width:min(1100px,92vw);max-height:72vh;display:block;border-radius:8px}
 .crop-box{position:absolute;border:2px solid var(--accent);box-shadow:0 0 0 9999px rgba(0,0,0,.55);cursor:move;border-radius:2px}
 .crop-grip{position:absolute;right:-8px;bottom:-8px;width:18px;height:18px;background:var(--accent);border-radius:4px;cursor:nwse-resize;border:2px solid #fff}
+.crop-head b{font-size:15px}
+.crop-strip{display:flex;gap:6px;overflow-x:auto;padding:2px 0 10px;margin-bottom:6px}
+.crop-strip img{width:46px;height:62px;object-fit:cover;border-radius:6px;cursor:pointer;opacity:.55;
+  border:2px solid transparent;background:#111;flex:0 0 auto;transition:.15s}
+.crop-strip img:hover{opacity:.9}
+.crop-strip img.on{opacity:1;border-color:var(--accent)}
 /* 标签管理 */
 .tagtable{width:100%;border-collapse:collapse;font-size:13px}
 .tagtable th{text-align:left;color:var(--dim);font-weight:400;padding:6px 8px;border-bottom:1px solid var(--line)}
@@ -1183,6 +1206,186 @@ function saveOrder(slug){
     .then(r=>r.text()).then(t=>{toast(t,true);setTimeout(()=>location.reload(),1200)}).catch(e=>toast('失败：'+e,false));
 }
 function resetOrder(){location.reload()}
+// ─────────── 裁剪器：封面(3:4) / 置顶 Banner(32:9) / 模特头像(1:1) 共用一套拖拽逻辑 ───────────
+// 封面与 Banner 的图来自【本套图】，头像的图来自【该模特名下任意一套图】（先选图集再选图）
+let CROP={mode:'cover',slug:'',model:'',img:'',ratio:3/4,ow:0,oh:0,x:0,y:0,w:0,h:0,dispW:0,dispH:0,list:[]};
+const CROP_META={
+  cover:{title:'✂ 裁剪封面',tip:'拖动选区移动 · 拖右下角调整大小 · 目标比例 3:4 · 输出 800×1067',save:'保存封面',url:'/cropcover'},
+  banner:{title:'🖼 裁剪首页大图（置顶轮播）',tip:'建议挑横构图 · 输出 1600×450（32:9）',save:'保存大图',url:'/cropbanner'},
+  avatar:{title:'🙂 裁剪模特头像',tip:'挑一张脸清晰的正方形区域 · 输出 320×320 圆形展示',save:'保存头像',url:'/cropavatar'}
+};
+function cropImages(slug,cb){
+  fetch('/setimages?slug='+encodeURIComponent(slug)).then(r=>r.json()).then(function(d){
+    if(!d.images||!d.images.length){toast('这套图还没有图片',true);return}
+    cb(d.images);
+  }).catch(function(e){toast('读取图片列表失败：'+e,true)});
+}
+// 短暂提示：2.5 秒后自己消失（toast() 不带 ok 时不会自动消失，会让"读取中…"一直挂着）
+function toastSpin(msg){
+  toast(msg);
+  const t=document.querySelector('.toast');
+  if(t)setTimeout(function(){if(t.parentNode)t.remove()},2500);
+}
+function openCropper(slug){openCropFor(slug,'cover')}
+function openBannerCropper(slug){openCropFor(slug,'banner')}
+function openCropFor(slug,mode){
+  toastSpin('读取图片列表…');
+  cropImages(slug,function(list){
+    CROP={mode:mode,slug:slug,model:'',img:list[0].img,ratio:(mode==='banner'?32/9:3/4),list:list,x:0,y:0,w:0,h:0,ow:0,oh:0,dispW:0,dispH:0};
+    buildCropModal();
+    fillCropSelect();
+    setCropImage(list[0].img);
+  });
+}
+function openAvatarCropper(model){
+  const sets=(window.MODEL_SETS||{})[model]||[];
+  if(!sets.length){toast('该模特名下还没有图集',false);return}
+  CROP={mode:'avatar',slug:sets[0].slug,model:model,img:'',ratio:1,list:[],x:0,y:0,w:0,h:0,ow:0,oh:0,dispW:0,dispH:0};
+  buildCropModal();
+  const ss=document.getElementById('cropSet');
+  sets.forEach(function(s){const o=document.createElement('option');o.value=s.slug;o.textContent=s.title+'（'+s.slug+'）';ss.appendChild(o)});
+  ss.value=CROP.slug;
+  ss.onchange=function(){CROP.slug=ss.value;loadCropImages()};
+  loadCropImages();
+}
+function loadCropImages(){
+  toastSpin('读取图片列表…');
+  cropImages(CROP.slug,function(list){
+    CROP.list=list;CROP.img=list[0].img;
+    fillCropSelect();setCropImage(list[0].img);
+  });
+}
+function fillCropSelect(){
+  const sel=document.getElementById('cropImg');if(!sel)return;
+  sel.innerHTML='';
+  CROP.list.forEach(function(it){const o=document.createElement('option');o.value=it.img;o.textContent=it.img;sel.appendChild(o)});
+  sel.value=CROP.img;
+  sel.onchange=function(){setCropImage(sel.value)};
+  const strip=document.getElementById('cropStrip');
+  if(strip){
+    strip.innerHTML='';
+    CROP.list.forEach(function(it){
+      const im=document.createElement('img');im.src=it.thumb;im.title=it.img;im.loading='lazy';
+      im.onclick=function(){setCropImage(it.img)};
+      strip.appendChild(im);
+    });
+  }
+}
+function markStrip(img){
+  const strip=document.getElementById('cropStrip');if(!strip)return;
+  [...strip.children].forEach(function(el){el.classList.toggle('on',el.title===img)});
+}
+function buildCropModal(){
+  const old=document.getElementById('cropper');if(old)old.remove();
+  const m=CROP_META[CROP.mode];
+  const box=document.createElement('div');
+  box.id='cropper';box.className='cropper';
+  box.innerHTML=[
+    '<div class="crop-head"><b>'+m.title+'</b>',
+    CROP.mode==='avatar'?'<select id="cropSet" title="选择图集"></select>':'',
+    '<select id="cropImg" title="选择图片"></select>',
+    '<button class="btn sm" id="cropSave">'+m.save+'</button>',
+    '<button class="btn ghost sm" id="cropCancel">取消</button>',
+    '<span class="sub" id="cropTip">'+m.tip+'</span></div>',
+    '<div class="crop-strip" id="cropStrip"></div>',
+    '<div class="crop-stage" id="cropStage"><img id="cropImgEl" alt=""><div class="crop-box" id="cropBox"></div></div>',
+    '<p class="sub" id="cropInfo" style="margin:8px 0 0"></p>'
+  ].join('');
+  document.body.appendChild(box);
+  document.getElementById('cropCancel').onclick=function(){box.remove()};
+  document.getElementById('cropSave').onclick=function(){saveCropNow()};
+}
+function setCropImage(img){
+  CROP.img=img;
+  const sel=document.getElementById('cropImg');if(sel&&sel.value!==img)sel.value=img;
+  markStrip(img);
+  const it=CROP.list.filter(function(x){return x.img===img})[0]||{};
+  CROP.ow=it.w||0;CROP.oh=it.h||0;
+  const el=document.getElementById('cropImgEl');
+  el.onload=function(){initCropBox()};
+  el.src=it.thumb||('/preview/'+encodeURIComponent(CROP.slug)+'/images/'+encodeURIComponent(img));
+}
+function initCropBox(){
+  const el=document.getElementById('cropImgEl'),boxEl=document.getElementById('cropBox');
+  CROP.dispW=el.clientWidth;CROP.dispH=el.clientHeight;
+  if(CROP.mode==='avatar'){
+    // 头像：默认框在"偏上一点"的位置（人像的脸大多在上半部），取宽度的 45%
+    let w=Math.min(CROP.dispW*0.45,CROP.dispH*0.45),h=w;
+    CROP.x=(CROP.dispW-w)/2;CROP.y=Math.min(CROP.dispH-h,Math.max(0,CROP.dispH*0.14));
+    CROP.w=w;CROP.h=h;
+  }else{
+    // 封面 / Banner：默认居中、尽量大的选区（按目标比例）
+    let w=CROP.dispW,h=w/CROP.ratio;
+    if(h>CROP.dispH){h=CROP.dispH;w=h*CROP.ratio}
+    CROP.x=(CROP.dispW-w)/2;CROP.y=(CROP.dispH-h)/2;CROP.w=w;CROP.h=h;
+  }
+  const draw=function(){
+    boxEl.style.left=CROP.x+'px';boxEl.style.top=CROP.y+'px';
+    boxEl.style.width=CROP.w+'px';boxEl.style.height=CROP.h+'px';
+    const sx=(CROP.ow&&el.naturalWidth)?CROP.ow/el.naturalWidth:1;
+    const sy=(CROP.oh&&el.naturalHeight)?CROP.oh/el.naturalHeight:1;
+    document.getElementById('cropInfo').textContent='选区（原图坐标）：'
+      +Math.round(CROP.x*sx)+', '+Math.round(CROP.y*sy)+' · '
+      +Math.round(CROP.w*sx)+'×'+Math.round(CROP.h*sy)+' px'
+      +(CROP.ow?'（原图 '+CROP.ow+'×'+CROP.oh+'）':'');
+  };
+  draw();
+  let mode=null,sx0=0,sy0=0,c0=null;
+  const pt=function(e){const r=el.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:t.clientX-r.left,y:t.clientY-r.top}};
+  const onDown=function(e,m){mode=m;const p=pt(e);sx0=p.x;sy0=p.y;c0=Object.assign({},CROP);e.preventDefault();e.stopPropagation()};
+  const onMove=function(e){
+    if(!mode)return;const p=pt(e);
+    const dx=p.x-sx0,dy=p.y-sy0;
+    if(mode==='move'){
+      CROP.x=Math.max(0,Math.min(CROP.dispW-CROP.w,c0.x+dx));
+      CROP.y=Math.max(0,Math.min(CROP.dispH-CROP.h,c0.y+dy));
+    }else{
+      let w=Math.max(40,c0.w+dx),h=w/CROP.ratio;
+      if(c0.y+h>CROP.dispH){h=CROP.dispH-c0.y;w=h*CROP.ratio}
+      if(w>CROP.dispW){w=CROP.dispW;h=w/CROP.ratio}
+      CROP.w=w;CROP.h=h;
+    }
+    draw();e.preventDefault();
+  };
+  const onUp=function(){mode=null};
+  boxEl.onmousedown=function(e){onDown(e,'move')};
+  boxEl.ontouchstart=function(e){onDown(e,'move')};
+  if(!boxEl.querySelector('.crop-grip')){
+    const grip=document.createElement('div');grip.className='crop-grip';
+    grip.onmousedown=function(e){onDown(e,'size')};grip.ontouchstart=function(e){onDown(e,'size')};
+    boxEl.appendChild(grip);
+  }
+  el.onmousedown=function(e){onDown(e,'move')};
+  document.addEventListener('mousemove',onMove);document.addEventListener('touchmove',onMove,{passive:false});
+  document.addEventListener('mouseup',onUp);document.addEventListener('touchend',onUp);
+}
+function saveCropNow(){
+  const el=document.getElementById('cropImgEl');
+  const sx=(CROP.ow&&el.naturalWidth)?CROP.ow/el.naturalWidth:1;
+  const sy=(CROP.oh&&el.naturalHeight)?CROP.oh/el.naturalHeight:1;
+  const payload={slug:CROP.slug,img:CROP.img,
+    x:Math.round(CROP.x*sx),y:Math.round(CROP.y*sy),
+    w:Math.round(CROP.w*sx),h:Math.round(CROP.h*sy)};
+  if(CROP.mode==='avatar')payload.model=CROP.model;
+  toast('正在生成并重建…');
+  fetch(CROP_META[CROP.mode].url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){return r.text()}).then(function(t){toast(t,true);const c=document.getElementById('cropper');if(c)c.remove();setTimeout(function(){location.reload()},1400)})
+    .catch(function(e){toast('失败：'+e,false)});
+}
+function clearAvatar(model){
+  if(!confirm('清除「'+model+'」的自定义头像？（退回用最新一套的封面）'))return;
+  toast('处理中…');
+  fetch('/clearavatar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:model})})
+    .then(function(r){return r.text()}).then(function(t){toast(t,true);setTimeout(function(){location.reload()},1400)})
+    .catch(function(e){toast('失败：'+e,false)});
+}
+function clearBanner(slug){
+  if(!confirm('清除这套图的自定义 Banner？（首页轮播退回用封面）'))return;
+  toast('处理中…');
+  fetch('/clearbanner',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug:slug})})
+    .then(function(r){return r.text()}).then(function(t){toast(t,true);setTimeout(function(){location.reload()},1400)})
+    .catch(function(e){toast('失败：'+e,false)});
+}
 """
 
 
@@ -1293,6 +1496,10 @@ def sets_cards(sets, view='card'):
             <a class="mini" href="http://127.0.0.1:8090/set/{quote(s['slug'])}/index.html" target="_blank" onclick="event.stopPropagation()">预览</a>
             <button class="mini" onclick="event.stopPropagation();togglePin('{s['slug']}',{0 if m.get('pinned') else 1})"
                     title="置顶后出现在首页顶部推荐轮播">{"取消置顶" if m.get("pinned") else "📌 置顶"}</button>
+            <button class="mini" onclick="event.stopPropagation();openBannerCropper('{s['slug']}')"
+                    title="从本套图里选一张裁成首页轮播大图（1600×450）">🖼 大图</button>
+            <button class="mini" onclick="event.stopPropagation();openCropper('{s['slug']}')"
+                    title="从本套图里选一张裁封面（3:4）">✂ 封面</button>
             <button class="mini" onclick="event.stopPropagation();del('{s['slug']}')">删除</button>
           </div></div></div>""")
     return ''.join(cards) or '<p class="sub">没有匹配的图集</p>'
@@ -1793,21 +2000,39 @@ def models_page(msg=''):
         ('bilibili', 'B站', '选填'), ('xhs', '小红书', '选填'), ('other', '其他', '籍贯/特长等'),
     ]
     blocks = []
+    model_sets_js = {}
     for model, slugs in sorted(by_model.items(), key=lambda kv: -len(kv[1])):
         pf = read_model_profile(model)
         st = model_stats(slugs)
         filled = sum(1 for k, _, _ in FIELDS if pf.get(k))
+        # 头像裁剪器的"选图集"下拉：按日期倒序
+        ordered = sorted(slugs, key=lambda sl: str(read_meta(os.path.join(SETS_DIR, sl)).get('date') or ''), reverse=True)
+        model_sets_js[model] = [{'slug': sl, 'title': read_meta(os.path.join(SETS_DIR, sl)).get('title') or sl}
+                                for sl in ordered]
+        av = avatar_path(model)
+        av_img = (f'<img src="/avatar/{quote(model_safe(model))}?t={int(os.path.getmtime(av))}" alt="" '
+                  f'style="width:64px;height:64px;object-fit:cover;border-radius:50%;background:#111;border:2px solid var(--line)">'
+                  if av else (f'<img src="{esc_attr(st["cover"])}" alt="" title="未设置头像，暂用最新一套的封面" '
+                              f'style="width:64px;height:64px;object-fit:cover;border-radius:50%;background:#111;border:2px dashed var(--line);opacity:.6">'
+                              if st['cover'] else '<span class="sub">无图</span>'))
+        av_state = '✅ 已设置自定义头像' if av else '未设置自定义头像（暂用最新一套的封面，圆形展示）'
         inputs = ''.join(
             f'<div><label>{label}</label><input type="text" data-f="{k}" value="{esc_attr(pf.get(k, ""))}" placeholder="{ph}"></div>'
             for k, label, ph in FIELDS)
         blocks.append(f"""<div class="panel" data-model="{esc_attr(model)}">
-  <h2 style="display:flex;align-items:center;gap:12px">
-    {f'<img src="{esc_attr(st["cover"])}" alt="" style="width:44px;height:59px;object-fit:cover;border-radius:6px;background:#111">' if st['cover'] else ''}
+  <h2 style="display:flex;align-items:center;gap:14px">
+    {av_img}
     <span>👤 {esc_attr(model)}
       <span class="sub" style="font-weight:400">· {st['sets']} 套 · {st['images']} 张{(' · 合计 ' + st['size']) if st['size'] else ''}{(' · 最新 ' + st['latest']) if st['latest'] else ''}</span>
+      <span class="sub" style="display:block;font-weight:400">{av_state}</span>
     </span>
   </h2>
-  <p class="sub" style="margin-top:-4px">资料完整度：{filled} / {len(FIELDS)} 个字段{'' if filled else '（留空的字段不会在站点上展示）'}</p>
+  <div class="row" style="margin:8px 0 4px;align-items:center">
+    <button class="btn sm" onclick="openAvatarCropper({json.dumps(model, ensure_ascii=False)})">🙂 设置头像</button>
+    {f'<button class="btn ghost sm" onclick="clearAvatar({json.dumps(model, ensure_ascii=False)})">清除头像</button>' if av else ''}
+    <span class="sub" style="margin:0">从该模特名下任意一套图里挑一张，裁成方形（站点上按圆形展示）</span>
+  </div>
+  <p class="sub" style="margin-top:6px">资料完整度：{filled} / {len(FIELDS)} 个字段{'' if filled else '（留空的字段不会在站点上展示）'} · 详情页只展示模特名与作品，资料统一在模特页展示</p>
   <div class="row" style="margin:10px 0 4px;align-items:center">
     <label style="margin:0">模特名</label>
     <input type="text" class="mname" value="{esc_attr(model)}" style="max-width:220px">
@@ -1826,9 +2051,11 @@ def models_page(msg=''):
 <a class="btn ghost sm" href="/">← 返回后台</a>
 <div class="panel"><h2>模特资料（按模特统一维护）</h2>
   <p class="sub">这里改一次，该模特名下<b>所有图集</b>都生效，不用一套套改。留空的字段不会展示。<br>
-    如果某套图集需要特殊资料，可在该图集的编辑页单独填写（会覆盖这里的值）。</p>
+    如果某套图集需要特殊资料，可在该图集的编辑页单独填写（会覆盖这里的值）。<br>
+    <b>头像</b>：点「🙂 设置头像」→ 选图集 → 选图片 → 拖动选区（正方形）→ 保存，站点上按圆形展示；不设置就用最新一套的封面。</p>
 </div>
-{''.join(blocks)}""", extra_js="""
+{''.join(blocks)}
+<script>window.MODEL_SETS={json.dumps(model_sets_js, ensure_ascii=False)};</script>""", extra_js="""
 function collectModel(box){const o={};box.querySelectorAll('input[data-f]').forEach(function(i){const v=i.value.trim();if(v)o[i.dataset.f]=v});return o}
 function saveModel(btn){
   const box=btn.closest('.panel'),model=box.dataset.model,profile=collectModel(box);
@@ -1879,6 +2106,115 @@ def write_model_profile(model, profile):
     elif os.path.exists(p):
         os.remove(p)
     return p
+
+
+def model_safe(model):
+    """模特名 → 文件名安全串（与 build.mjs 的 avatarUrl() 规则保持一致）"""
+    return re.sub(r'[\\/:*?"<>|]', '_', str(model)).strip()
+
+
+def avatar_path(model):
+    """该模特的自定义头像文件（models/avatar/<模特>.jpg|webp），没有返回 None"""
+    d = os.path.join(ROOT, 'models', 'avatar')
+    safe = model_safe(model)
+    for ext in ('.webp', '.jpg', '.jpeg', '.png'):
+        p = os.path.join(d, safe + ext)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def crop_region(src, box, out_w, out_h):
+    """按选区裁剪 + 缩放到 out_w×out_h（用 EXIF 摆正后的原图坐标）"""
+    im = ImageOps.exif_transpose(Image.open(src)).convert('RGB')
+    W, H = im.size
+    x1 = max(0, min(W - 1, int(box[0])))
+    y1 = max(0, min(H - 1, int(box[1])))
+    x2 = max(x1 + 10, min(W, int(box[2])))
+    y2 = max(y1 + 10, min(H, int(box[3])))
+    return im.crop((x1, y1, x2, y2)).resize((out_w, out_h), Image.LANCZOS), (x1, y1, x2, y2)
+
+
+def save_banner(slug, img, box):
+    """置顶轮播的自定义 Banner：从【本套图】里选一张裁成 BANNER_W×BANNER_H"""
+    set_dir = os.path.join(SETS_DIR, slug)
+    src = os.path.join(set_dir, 'images', img)
+    if not os.path.isfile(src):
+        return False, '图片不存在（请刷新页面重选）'
+    crop, (x1, y1, x2, y2) = crop_region(src, box, BANNER_W, BANNER_H)
+    crop.save(os.path.join(set_dir, 'banner.jpg'), 'JPEG', quality=90, optimize=True, progressive=True)
+    tdir = os.path.join(set_dir, 'thumbs')
+    os.makedirs(tdir, exist_ok=True)
+    crop.save(os.path.join(tdir, 'banner.jpg'), 'JPEG', quality=88)
+    if WEBP_ENABLED:
+        try:
+            crop.save(os.path.join(tdir, 'banner.webp'), 'WEBP', quality=WEBP_Q, method=6)
+        except Exception:  # noqa
+            pass
+    meta = read_meta(set_dir)
+    meta['banner'] = {'img': img, 'x': x1, 'y': y1, 'w': x2 - x1, 'h': y2 - y1,
+                      'out': f'{BANNER_W}x{BANNER_H}'}
+    save_meta(set_dir, meta)
+    return True, f'✓ Banner 已裁剪：{img} 的 {x2 - x1}×{y2 - y1} 区域 → {BANNER_W}×{BANNER_H}'
+
+
+def save_avatar(model, slug, img, box):
+    """模特头像：从【该模特名下任意一套图】里选一张裁成方形 AVATAR_PX×AVATAR_PX"""
+    src = os.path.join(SETS_DIR, slug, 'images', img)
+    if not os.path.isfile(src):
+        return False, '图片不存在（请刷新页面重选）'
+    crop, (x1, y1, x2, y2) = crop_region(src, box, AVATAR_PX, AVATAR_PX)
+    d = os.path.join(ROOT, 'models', 'avatar')
+    os.makedirs(d, exist_ok=True)
+    safe = model_safe(model)
+    crop.save(os.path.join(d, safe + '.jpg'), 'JPEG', quality=92, optimize=True, progressive=True)
+    if WEBP_ENABLED:
+        try:
+            crop.save(os.path.join(d, safe + '.webp'), 'WEBP', quality=WEBP_Q, method=6)
+        except Exception:  # noqa
+            pass
+    prof = read_model_profile(model)
+    prof['avatar'] = {'set': slug, 'img': img, 'x': x1, 'y': y1, 'w': x2 - x1, 'h': y2 - y1}
+    write_model_profile(model, prof)
+    return True, f'✓ 「{model}」头像已更新：{img} 的 {x2 - x1}×{y2 - y1} 区域 → {AVATAR_PX}×{AVATAR_PX}'
+
+
+def clear_avatar(model):
+    """删掉自定义头像（页面自动退回用封面当头像）"""
+    d = os.path.join(ROOT, 'models', 'avatar')
+    safe = model_safe(model)
+    n = 0
+    for ext in ('.jpg', '.jpeg', '.webp', '.png'):
+        p = os.path.join(d, safe + ext)
+        if os.path.isfile(p):
+            try:
+                os.remove(p)
+                n += 1
+            except Exception:  # noqa
+                pass
+    prof = read_model_profile(model)
+    if prof.pop('avatar', None) is not None:
+        write_model_profile(model, prof)
+    return n
+
+
+def clear_banner(slug):
+    """删掉自定义 Banner（置顶轮播自动退回封面）"""
+    set_dir = os.path.join(SETS_DIR, slug)
+    n = 0
+    for p in [os.path.join(set_dir, 'banner.jpg'), os.path.join(set_dir, 'banner.jpeg'),
+              os.path.join(set_dir, 'banner.png'), os.path.join(set_dir, 'banner.webp'),
+              os.path.join(set_dir, 'thumbs', 'banner.jpg'), os.path.join(set_dir, 'thumbs', 'banner.webp')]:
+        if os.path.isfile(p):
+            try:
+                os.remove(p)
+                n += 1
+            except Exception:  # noqa
+                pass
+    meta = read_meta(set_dir)
+    if meta.pop('banner', None) is not None:
+        save_meta(set_dir, meta)
+    return n
 
 
 def all_tags():
@@ -2232,92 +2568,7 @@ function bulkSetSeries(){const v=document.getElementById('bulkSeries').value.tri
 function bulkAddTags(){const v=document.getElementById('bulkTags').value.trim();if(!v){toast('请填写标签',false);return}bulkSend('addTags',{value:v})}
 function bulkAutoTag(){bulkSend('autotag',{},'对选中图集批量 AI 打标')}
 function bulkDelete(){bulkSend('delete',{},'删除选中图集（不可恢复）')}
-// ── 封面裁剪选择器（可视化拖拽 3:4 选区） ──
-let CROP={slug:'',img:'',x:0,y:0,w:0,h:0,natW:0,natH:0,dispW:0,dispH:0};
-function openCropper(slug){
-  const first=document.querySelector('#thumbs .thumb');
-  const img=first?first.dataset.img:'';
-  if(!img){toast('该图集还没有图片',false);return}
-  buildCropper(slug,img);
-}
-function buildCropper(slug,img){
-  const old=document.getElementById('cropper');if(old)old.remove();
-  const box=document.createElement('div');
-  box.id='cropper';box.className='cropper';
-  box.innerHTML=[
-    '<div class="crop-head">✂ 裁剪封面（拖动选区移动 · 拖右下角调整大小 · 目标比例 3:4）',
-    '<select id="cropImg"></select>',
-    '<button class="btn sm" id="cropSave">保存封面</button>',
-    '<button class="btn ghost sm" id="cropCancel">取消</button></div>',
-    '<div class="crop-stage" id="cropStage"><img id="cropImgEl" alt=""><div class="crop-box" id="cropBox"></div></div>',
-    '<p class="sub" id="cropInfo" style="margin:8px 0 0"></p>'
-  ].join('');
-  document.body.appendChild(box);
-  const sel=document.getElementById('cropImg');
-  [...document.querySelectorAll('#thumbs .thumb')].forEach(t=>{
-    const o=document.createElement('option');o.value=t.dataset.img;o.textContent=t.dataset.img;sel.appendChild(o);
-  });
-  sel.value=img;
-  sel.onchange=()=>buildCropper(slug,sel.value);
-  document.getElementById('cropCancel').onclick=()=>box.remove();
-  document.getElementById('cropSave').onclick=()=>saveCrop(slug);
-  const el=document.getElementById('cropImgEl');
-  el.onload=()=>initCropBox();
-  el.src='/preview/'+encodeURIComponent(slug)+'/images/'+encodeURIComponent(img);
-}
-function initCropBox(){
-  const el=document.getElementById('cropImgEl'),stage=document.getElementById('cropStage'),boxEl=document.getElementById('cropBox');
-  CROP.natW=el.naturalWidth;CROP.natH=el.naturalHeight;
-  CROP.dispW=el.clientWidth;CROP.dispH=el.clientHeight;
-  // 默认居中、尽量大的 3:4 选区
-  let h=CROP.dispH, w=h*3/4;
-  if(w>CROP.dispW){w=CROP.dispW;h=w*4/3}
-  CROP.x=(CROP.dispW-w)/2;CROP.y=(CROP.dispH-h)/2;CROP.w=w;CROP.h=h;
-  const draw=()=>{
-    boxEl.style.left=CROP.x+'px';boxEl.style.top=CROP.y+'px';
-    boxEl.style.width=CROP.w+'px';boxEl.style.height=CROP.h+'px';
-    const sx=CROP.natW/CROP.dispW, sy=CROP.natH/CROP.dispH;
-    document.getElementById('cropInfo').textContent='选区（原图坐标）：'
-      +Math.round(CROP.x*sx)+', '+Math.round(CROP.y*sy)+' · '
-      +Math.round(CROP.w*sx)+'×'+Math.round(CROP.h*sy)+' px';
-  };
-  draw();
-  let mode=null,sx0=0,sy0=0,c0=null;
-  const onDown=(e,m)=>{mode=m;const p=pt(e);sx0=p.x;sy0=p.y;c0=Object.assign({},CROP);e.preventDefault();e.stopPropagation()};
-  const pt=(e)=>{const r=el.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return{x:t.clientX-r.left,y:t.clientY-r.top}};
-  const onMove=(e)=>{
-    if(!mode)return;const p=pt(e);
-    const dx=p.x-sx0, dy=p.y-sy0;
-    if(mode==='move'){
-      CROP.x=Math.max(0,Math.min(CROP.dispW-CROP.w,c0.x+dx));
-      CROP.y=Math.max(0,Math.min(CROP.dispH-CROP.h,c0.y+dy));
-    }else{
-      let w=Math.max(60,c0.w+dx);let h=w*4/3;
-      if(c0.y+h>CROP.dispH){h=CROP.dispH-c0.y;w=h*3/4}
-      CROP.w=w;CROP.h=h;
-    }
-    draw();e.preventDefault();
-  };
-  const onUp=()=>{mode=null};
-  boxEl.onmousedown=e=>onDown(e,'move');
-  boxEl.ontouchstart=e=>onDown(e,'move');
-  const grip=document.createElement('div');grip.className='crop-grip';
-  grip.onmousedown=e=>onDown(e,'size');grip.ontouchstart=e=>onDown(e,'size');
-  boxEl.appendChild(grip);
-  el.onmousedown=e=>{onDown(e,'move');};
-  document.addEventListener('mousemove',onMove);document.addEventListener('touchmove',onMove,{passive:false});
-  document.addEventListener('mouseup',onUp);document.addEventListener('touchend',onUp);
-}
-function saveCrop(slug){
-  const sx=CROP.natW/CROP.dispW, sy=CROP.natH/CROP.dispH;
-  const payload={slug,img:document.getElementById('cropImg').value,
-    x:Math.round(CROP.x*sx),y:Math.round(CROP.y*sy),
-    w:Math.round(CROP.w*sx),h:Math.round(CROP.h*sy)};
-  toast('正在生成封面…');
-  fetch('/cropcover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-    .then(r=>r.text()).then(t=>{toast(t,true);document.getElementById('cropper')?.remove();setTimeout(()=>location.reload(),1200)})
-    .catch(e=>toast('失败：'+e,false));
-}
+// 裁剪器（封面 / 置顶 Banner / 模特头像）已挪到全站公共 JS，编辑页与模特页也能用
 // 图集筛选
 const sf=document.getElementById('setFilter'),sg=document.getElementById('setsGrid'),se=document.getElementById('setEmpty');
 if(sf&&sg){sf.addEventListener('input',()=>{const q=sf.value.trim().toLowerCase();let n=0;[...sg.querySelectorAll('.set')].forEach(c=>{const hit=!q||(c.dataset.search||'').includes(q);c.hidden=!hit;if(hit)n++});if(se)se.hidden=n!==0})}
@@ -2471,8 +2722,10 @@ def edit_page(slug, msg=''):
     <button class="btn ghost sm" onclick="resetOrder()">↺ 还原</button>
     <button class="btn ghost sm" onclick="dedupe('{slug}')">清理重复图片</button>
     <button class="btn ghost sm" onclick="openCropper('{slug}')">✂ 裁剪封面</button>
+    <button class="btn ghost sm" onclick="openBannerCropper('{slug}')">🖼 裁剪首页大图</button>
     <span class="sub" style="margin:0">按文件内容比对，保留每组的第一张（新上传已自动去重）</span>
   </div>
+  <div class="sub" style="margin:-6px 0 10px">封面/大图都从本套图里选一张裁剪：封面 3:4（800×1067），首页大图 32:9（1600×450，用于置顶轮播）；点上面按钮后可在弹层里换图、拖拽选区。</div>
   <div class="thumbs" id="thumbs">{thumbs or '<p class="sub">暂无图片</p>'}</div>
 </div>"""
     if msg:
@@ -2549,6 +2802,12 @@ class Handler(BaseHTTPRequestHandler):
         p = os.path.normpath(os.path.join(SETS_DIR, rel))
         if not p.startswith(SETS_DIR) or not os.path.isfile(p):
             return self._text('not found', 404)
+        return self._serve_abs(p)
+
+    def _serve_abs(self, p):
+        """发送任意本地图片文件（头像在 models/ 下，不在 sets/ 里）"""
+        if not os.path.isfile(p):
+            return self._text('not found', 404)
         ext = os.path.splitext(p)[1].lower()
         ctype = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif'}.get(ext, 'application/octet-stream')
         with open(p, 'rb') as f:
@@ -2585,6 +2844,47 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(publish_status())
         if u.path == '/autotag-status':
             return self._json(autotag_status())
+        if u.path == '/setimages':
+            # 给"头像裁剪"用：列出一套图里的全部图片 + 可直接显示的缩略图地址
+            from urllib.parse import parse_qs, unquote as _unq
+            qs = parse_qs(u.query or '')
+            slug = _unq((qs.get('slug') or [''])[0])
+            d = os.path.join(SETS_DIR, slug)
+            if not os.path.isdir(d):
+                return self._text('图集不存在', 404)
+            items = []
+            for f in set_images(d):
+                base = os.path.splitext(f)[0]
+                thumb = ''
+                for ext in ('.webp', '.jpg'):
+                    if os.path.exists(os.path.join(d, 'thumbs', base + ext)):
+                        thumb = f'/preview/{quote(slug)}/thumbs/{quote(base + ext)}'
+                        break
+                # 原图像素：裁剪时用它在"原图坐标"与"预览图坐标"之间换算
+                # 只读文件头（Image.open 是惰性的）——这里千万别 exif_transpose：那会把每张图整张解码，
+                # 48 张 4000×6000 的图要几十秒，裁剪弹层会一直转圈打不开
+                w = h = 0
+                try:
+                    with Image.open(os.path.join(d, 'images', f)) as im:
+                        w, h = im.size
+                        try:
+                            orient = (im.getexif() or {}).get(274)
+                        except Exception:  # noqa
+                            orient = None
+                        if orient in (5, 6, 7, 8):   # 竖拍旋转 90°：裁剪切图会摆正，宽高要对调
+                            w, h = h, w
+                except Exception:  # noqa
+                    pass
+                items.append({'img': f, 'thumb': thumb or f'/preview/{quote(slug)}/images/{quote(f)}', 'w': w, 'h': h})
+            return self._json({'slug': slug, 'count': len(items), 'images': items})
+        if u.path.startswith('/avatar/'):
+            # 后台预览模特头像（models/avatar/<名>.jpg|webp）
+            from urllib.parse import unquote as _unq2
+            name = _unq2(u.path[len('/avatar/'):])
+            p = avatar_path(name)
+            if not p:
+                return self._text('该模特还没有自定义头像', 404)
+            return self._serve_abs(p)
         if u.path.startswith('/preview/'):
             from urllib.parse import unquote
             return self._serve_file(unquote(u.path[len('/preview/'):]))
@@ -2797,6 +3097,42 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             ok, out = rebuild()
             return self._text(f'✓ 封面已按自定义区域裁剪（{x2 - x1}×{y2 - y1} → {COVER_W}×{COVER_H}）\n重建：' + ('成功' if ok else '失败'))
+        if u.path == '/cropbanner':
+            d = self._json_body()
+            slug, img = d.get('slug', ''), d.get('img', '')
+            try:
+                box = (int(d['x']), int(d['y']), int(d['x']) + int(d['w']), int(d['y']) + int(d['h']))
+            except Exception:
+                return self._text('裁剪参数错误', 400)
+            ok, m = save_banner(slug, img, box)
+            if not ok:
+                return self._text(m, 404)
+            ok2, out = rebuild()
+            return self._text(m + '\n重建：' + ('成功' if ok2 else '失败'))
+        if u.path == '/cropavatar':
+            d = self._json_body()
+            model, slug, img = d.get('model', ''), d.get('slug', ''), d.get('img', '')
+            if not model:
+                return self._text('缺少模特名', 400)
+            try:
+                box = (int(d['x']), int(d['y']), int(d['x']) + int(d['w']), int(d['y']) + int(d['h']))
+            except Exception:
+                return self._text('裁剪参数错误', 400)
+            ok, m = save_avatar(model, slug, img, box)
+            if not ok:
+                return self._text(m, 404)
+            ok2, out = rebuild()
+            return self._text(m + '\n重建：' + ('成功' if ok2 else '失败'))
+        if u.path == '/clearavatar':
+            d = self._json_body()
+            n = clear_avatar(d.get('model', ''))
+            ok, out = rebuild()
+            return self._text(('✓ 已清除自定义头像（退回用封面）' if n or True else '') + f'（删除 {n} 个文件）\n重建：' + ('成功' if ok else '失败'))
+        if u.path == '/clearbanner':
+            d = self._json_body()
+            n = clear_banner(d.get('slug', ''))
+            ok, out = rebuild()
+            return self._text(f'✓ 已清除自定义 Banner（退回用封面）（删除 {n} 个文件）\n重建：' + ('成功' if ok else '失败'))
         if u.path == '/reorder':
             d = self._json_body()
             slug = d.get('slug', '')

@@ -220,6 +220,24 @@ function modelProfile(model) {
   try { return JSON.parse(readFileSync(join(ROOT, 'models', safe + '.json'), 'utf8')) } catch { return {} }
 }
 
+/** 模特头像（后台从该模特任意一套图里裁剪生成）：没有就返回空串，页面自动退回封面 */
+function avatarUrl(model, rel = '') {
+  if (!model) return ''
+  const safe = String(model).replace(/[\\/:*?"<>|]/g, '_').trim()
+  if (!safe) return ''
+  const dir = join(ROOT, 'models', 'avatar')
+  const f = ['webp', 'jpg', 'jpeg', 'png'].map(ext => safe + '.' + ext).find(x => existsSync(join(dir, x)))
+  if (!f) return ''
+  return `${rel}assets/avatar/${encodeURIComponent(f)}${verQ(fileVer(join(dir, f)))}`
+}
+
+/** 模特圆形头像（后台从该模特任意一套图里裁剪生成）：没有就返回空串，页面自动退回封面 */
+function avatarHtml(model, rel = '', size = 'sm', cls = '') {
+  const u = avatarUrl(model, rel)
+  if (!u) return ''
+  return `<span class="mavatar mavatar-${size}${cls ? ' ' + cls : ''}"><img src="${u}" alt="${esc(model)}" loading="lazy"></span>`
+}
+
 function readSet(slug) {
   const dir = join(SETS_DIR, slug)
   const metaPath = join(dir, 'meta.json')
@@ -245,9 +263,12 @@ function readSet(slug) {
   }
   const thumbs = Object.values(thumbFor)
   const coverThumb = ['cover.webp', 'cover.jpg', 'cover.jpeg', 'cover.png'].find(f => existsSync(join(dir, 'thumbs', f)))
+  // 自定义 Banner（后台裁剪生成，置顶轮播用；没设置就退回封面）
+  const bannerFile = ['banner.jpg', 'banner.jpeg', 'banner.png', 'banner.webp'].find(f => existsSync(join(dir, f)))
+  const bannerThumb = ['banner.webp', 'banner.jpg', 'banner.jpeg', 'banner.png'].find(f => existsSync(join(dir, 'thumbs', f)))
   // 缩略图版本戳：文件变了 URL 就变，避免读到旧缓存
   const thumbVer = {}
-  for (const f of [...thumbs, coverThumb].filter(Boolean)) thumbVer[f] = fileVer(join(dir, 'thumbs', f))
+  for (const f of [...thumbs, coverThumb, bannerThumb].filter(Boolean)) thumbVer[f] = fileVer(join(dir, 'thumbs', f))
   // 模糊占位图（LQIP）：只内联前 N 张（默认 12）——整套图都展示时，几百张的 base64 会把 HTML 撑到几百 KB，
   // 而布局高度是构建时按 data-ratio 算好的，后面的图没有占位也不会跳动。
   const lqip = {}
@@ -309,6 +330,8 @@ function readSet(slug) {
     packPath: hasPack ? packPath : null,
     coverFile,
     coverThumb,
+    bannerFile,
+    bannerThumb,
     images,
     thumbs,
     thumbFor,
@@ -506,15 +529,22 @@ function pagerHtml(page, totalPages, hrefOf) {
  *  布局：左边 16:9 轮播舞台 + 右边置顶清单（点清单可切换，不用等自动播放） */
 function heroHtml(pinned, rel = '') {
   if (!pinned.length) return ''
-  const slides = pinned.map((s, i) => `
+  // 轮播大图：后台裁过 Banner 就用 Banner（默认仍用封面）
+  const pic = (s) => s.bannerThumb ? { f: 'thumbs/' + s.bannerThumb, v: s.thumbVer[s.bannerThumb], banner: true }
+    : (s.coverThumb ? { f: 'thumbs/' + s.coverThumb, v: s.thumbVer[s.coverThumb], banner: false }
+      : (s.coverFile ? { f: s.coverFile, v: '', banner: false } : null))
+  const slides = pinned.map((s, i) => {
+    const p = pic(s)
+    return `
     <a class="hero-slide${i ? '' : ' on'}" href="${rel}set/${s.slug}/index.html" aria-label="${esc(s.title)}">
-      ${s.coverFile ? `<img src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="${esc(s.title)}"${i ? ' loading="lazy"' : ''}>` : ''}
+      ${p ? `<img class="${p.banner ? 'is-banner' : ''}" src="${rel}set/${s.slug}/${p.f}${verQ(p.v)}" alt="${esc(s.title)}"${i ? ' loading="lazy"' : ''}>` : ''}
       <span class="hero-info">
         <span class="hero-badge">📌 置顶推荐</span>
         <h2>${esc(s.title)}</h2>
         <span class="hero-meta">${[s.model, `${s.imageCount} 张`, s.sizeText].filter(Boolean).map(esc).join(' · ')}</span>
       </span>
-    </a>`).join('')
+    </a>`
+  }).join('')
   const multi = pinned.length > 1
   const dots = multi
     ? `<div class="hero-dots">${pinned.map((_, i) => `<button class="hero-dot${i ? '' : ' on'}" aria-label="第 ${i + 1} 张"></button>`).join('')}</div>`
@@ -632,8 +662,8 @@ function modelPage(name, list, rel = '../') {
   const seriesList = [...new Set(list.map(s => s.series).filter(Boolean))]
   const body = `
   <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}models.html">模特</a><span>/</span><span class="cur">${esc(name)}</span></nav>
-  <div class="page-head">
-    <h1>👤 ${esc(name)}</h1>
+  <div class="page-head model-head">
+    <h1>${avatarHtml(name, rel, 'md') || '👤 '}${esc(name)}</h1>
     <p class="sub">共 ${list.length} 套图集 · ${imgs} 张${bytes ? ` · 合计 <b class="size-strong">${esc(fmtSize(bytes))}</b>` : ''}${latest ? ` · 最新 ${esc(latest)}` : ''}</p>
   </div>
   ${profileQuoteHtml(pf)}
@@ -673,7 +703,7 @@ function modelsIndexPage(byModel, allSets) {
         <span class="badge">${list.length} 套</span>
         ${b ? `<span class="badge badge-size">${esc(fmtSize(b))}</span>` : ''}
       </div>
-      <h2 class="card-title">👤 ${esc(name)}</h2>
+      <h2 class="card-title">${avatarHtml(name, '', 'xs') || '👤 '}${esc(name)}</h2>
     </a>
     <div class="card-meta">
       <span class="card-chips">${chips}</span>
@@ -737,13 +767,16 @@ function seriesIndexPage(bySeries, allSets) {
 
 function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {}, moreSets = [], modelTotal = 0) {
   const rel = '../../'
-  // 模特行：封面（优先用该模特另一套的封面）+ 名字 + 套数 → 点进模特页
+  // 模特行：头像（后台设了就用圆形头像，否则用该模特另一套的封面）+ 名字 + 套数 → 点进模特页
   // 详情页不再放模特资料（出生/身高/风格…），资料统一只在模特页展示
   const face = moreSets[0] || s
+  const modelAvatar = avatarUrl(s.model, rel)
   const modelRow = s.model ? `<a class="side-row" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品">
-        <span class="sr-art">${face.coverFile
-          ? `<img loading="lazy" src="${rel}set/${face.slug}/${face.coverThumb ? 'thumbs/' + face.coverThumb + verQ(face.thumbVer[face.coverThumb]) : face.coverFile}" alt="${esc(s.model)}">`
-          : '👤'}</span>
+        ${modelAvatar
+          ? `<span class="sr-art sr-round"><img loading="lazy" src="${modelAvatar}" alt="${esc(s.model)}"></span>`
+          : `<span class="sr-art">${face.coverFile
+            ? `<img loading="lazy" src="${rel}set/${face.slug}/${face.coverThumb ? 'thumbs/' + face.coverThumb + verQ(face.thumbVer[face.coverThumb]) : face.coverFile}" alt="${esc(s.model)}">`
+            : '👤'}</span>`}
         <span class="sr-body"><b>${esc(s.model)}</b><span class="sr-meta">${modelTotal > 1 ? `${modelTotal} 套图集` : '全部作品'}</span></span>
         <span class="sr-go">›</span>
       </a>` : ''
@@ -965,6 +998,7 @@ img{max-width:100%;display:block}
 .badge{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.65);color:#fff;font-size:12px;padding:2px 8px;border-radius:999px}
 .badge-size{left:auto;right:8px;background:rgba(91,140,255,.85)}
 .card-title{margin:0;padding:12px 12px 6px;font-size:14px;line-height:1.5;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-title .mavatar{margin-right:6px;margin-top:-3px}
 .card-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:0 12px 12px;font-size:12px;color:var(--dim)}
 /* 日期固定单独占一行右对齐：标签多少不一，若跟着标签排会出现"有的同行、有的换行" */
 .card-meta time{flex:1 0 100%;margin:0;text-align:right}
@@ -976,6 +1010,14 @@ img{max-width:100%;display:block}
 /* 详情页标题旁的体量标签（原图总大小）＋分类页「合计」强调 */
 .tag-size{color:#4ec99a;border-color:rgba(78,201,154,.42);background:rgba(78,201,154,.10);cursor:default}
 .size-strong{color:var(--fg);font-weight:600}
+/* 模特头像（后台裁剪生成，圆形）：xs 列表卡片 / sm 侧栏 / md 模特页标题 */
+.mavatar{display:inline-flex;flex:0 0 auto;border-radius:50%;overflow:hidden;background:var(--panel2);
+  border:1px solid var(--line);vertical-align:middle}
+.mavatar img{width:100%;height:100%;object-fit:cover;display:block}
+.mavatar-xs{width:24px;height:24px}
+.mavatar-sm{width:38px;height:38px}
+.mavatar-md{width:64px;height:64px;border-width:2px}
+.page-head.model-head h1{display:flex;align-items:center;gap:12px}
 .card-meta a.tag:hover,.detail-meta a.tag:hover{color:var(--accent);border-color:var(--accent);background:rgba(91,140,255,.12)}
 .pager{display:flex;align-items:center;justify-content:center;gap:18px;margin:34px 0}
 /* 筛选栏 */
@@ -997,6 +1039,7 @@ img{max-width:100%;display:block}
 .hero-slide{position:absolute;inset:0;display:block;opacity:0;transition:opacity .55s ease;text-decoration:none;color:#fff;pointer-events:none}
 .hero-slide.on{opacity:1;pointer-events:auto}
 .hero-slide img{width:100%;height:100%;object-fit:cover;object-position:center 22%;display:block}
+.hero-slide img.is-banner{object-position:center center}   /* 自己裁的 Banner 用居中，别再偏向面部 */
 .hero-slide::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.05) 0%,rgba(0,0,0,.2) 45%,rgba(0,0,0,.78) 100%)}
 .hero-slide:hover img{filter:brightness(1.06)}
 /* 文字块：宽松排版（去掉 CTA 后只留 角标 / 标题 / 信息 三行） */
@@ -1147,6 +1190,7 @@ img{max-width:100%;display:block}
 .sr-art{flex:0 0 38px;width:38px;height:50px;border-radius:7px;overflow:hidden;background:var(--panel);
   display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1}
 .sr-art img{width:100%;height:100%;object-fit:cover;display:block}
+.sr-art.sr-round{width:38px;height:38px;border-radius:50%}   /* 有自定义头像时用圆形 */
 .sr-body{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
 .sr-body b{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sr-meta{font-size:11.5px;color:var(--dim)}
@@ -1184,6 +1228,8 @@ img{max-width:100%;display:block}
   .side-rows{gap:5px}
   .side-row{padding:4px 8px 4px 4px}
   .sr-art{flex-basis:34px;width:34px;height:44px;font-size:16px}
+  .sr-art.sr-round{flex-basis:34px;width:34px;height:34px}
+  .mavatar-sm{width:34px;height:34px}
   .ss-cover{flex-basis:34px;width:34px;height:44px}
   .side-set{padding:2px 4px}
   .side-sets{gap:2px}
@@ -1812,6 +1858,16 @@ function writeAssets() {
   writeFileSync(join(DIST, 'assets', 'style.css'), STYLE)
   writeFileSync(join(DIST, 'assets', 'app.js'), APP)
   writeFileSync(join(DIST, 'assets', 'photoswipe-extra.css'), PSWP_EXTRA)
+  // 模特头像（后台裁剪生成，models/avatar/<模特>.{webp,jpg,png}）→ 站点静态资源
+  const avSrc = join(ROOT, 'models', 'avatar')
+  if (existsSync(avSrc)) {
+    const avOut = join(DIST, 'assets', 'avatar')
+    mkdirSync(avOut, { recursive: true })
+    for (const f of readdirSync(avSrc)) {
+      if (!/\.(webp|jpe?g|png)$/i.test(f)) continue
+      copyFileSync(join(avSrc, f), join(avOut, f))
+    }
+  }
   // PhotoSwipe（本地化，无 CDN 依赖）
   const pswpSrc = join(ROOT, 'vendor', 'photoswipe')
   if (existsSync(pswpSrc)) {
@@ -1977,14 +2033,15 @@ function build() {
     // 清晰度优先：100 套约 8500 个文件，仍在 Pages 免费额度 2 万以内
     if (s.hasThumbs) {
       const thumbOut = join(outDir, 'thumbs')
-      const keep = new Set([...s.thumbs, ...Object.values(s.thumbAlt || {}), s.coverThumb].filter(Boolean))
+      const keep = new Set([...s.thumbs, ...Object.values(s.thumbAlt || {}), s.coverThumb, s.bannerThumb].filter(Boolean))
       mkdirSync(thumbOut, { recursive: true })
       keep.forEach(f => copyFileSync(join(s.dir, 'thumbs', f), join(thumbOut, f)))
       deployedThumbCount += keep.size
     }
 
-    // 封面
+    // 封面 / 自定义 Banner
     if (s.coverFile) copyFileSync(join(s.dir, s.coverFile), join(outDir, s.coverFile))
+    if (s.bannerFile && s.bannerFile !== s.coverFile) copyFileSync(join(s.dir, s.bannerFile), join(outDir, s.bannerFile))
   })
 
   // ── 系列页 / 标签页（静态化，SEO 友好）──
