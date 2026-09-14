@@ -1058,6 +1058,22 @@ table.lk tr.bad td{color:#ff8a8a}
   background:linear-gradient(180deg,rgba(0,0,0,0),rgba(0,0,0,.45) 55%,rgba(0,0,0,.8));
   display:flex;align-items:flex-end;padding:8px 10px;box-sizing:border-box}
 .crop-safe span{font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:2px 8px;border-radius:999px;opacity:.9}
+/* 选区实时预览：按最终的显示框裁出来，所见即所得（标题压暗效果也一起模拟） */
+.crop-preview{position:relative;display:block;margin:10px 0 0;overflow:hidden;background:#000;
+  border:1px solid var(--line);border-radius:10px;width:160px}
+.crop-preview.wide{width:min(420px,92vw)}
+.crop-preview:not(.wide){border-radius:22%}
+.cp-inner{position:relative;width:100%;overflow:hidden}
+.crop-preview.wide .cp-inner{aspect-ratio:32/9}
+.crop-preview:not(.wide) .cp-inner{aspect-ratio:1}
+.cp-inner img{position:absolute;max-width:none;display:block}
+.cp-overlay{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:flex-end;gap:6px;
+  padding:9px 11px;box-sizing:border-box;pointer-events:none;
+  background:linear-gradient(180deg,rgba(0,0,0,0) 0%,rgba(0,0,0,0) 46%,rgba(0,0,0,.24) 66%,rgba(0,0,0,.62) 86%,rgba(0,0,0,.82) 100%)}
+.cp-overlay b{font-size:13px;font-weight:600;color:#fff}
+.cp-badge{align-self:flex-start;background:rgba(255,180,84,.92);color:#1a1206;font-size:11px;font-weight:600;
+  padding:2px 8px;border-radius:999px}
+.crop-preview-note{font-size:12px;color:var(--dim);margin:6px 0 0}
 /* 标签管理 */
 .tagtable{width:100%;border-collapse:collapse;font-size:13px}
 .tagtable th{text-align:left;color:var(--dim);font-weight:400;padding:6px 8px;border-bottom:1px solid var(--line)}
@@ -1290,17 +1306,24 @@ function buildCropModal(){
     CROP.mode==='avatar'?'<select id="cropSet" title="选择图集"></select>':'',
     '<select id="cropImg" title="选择图片"></select>',
     '<button class="btn sm" id="cropSave">'+m.save+'</button>',
+    '<button class="btn ghost sm" id="cropReset" title="把选区恢复成默认大小（居中）">↺ 重置选区</button>',
     '<button class="btn ghost sm" id="cropCancel">取消</button>',
     '<span class="sub" id="cropTip">'+m.tip+'</span></div>',
     '<div class="crop-strip" id="cropStrip"></div>',
-    '<div class="crop-stage" id="cropStage"><img id="cropImgEl" alt=""><div class="crop-box" id="cropBox"></div>',
+    '<div class="crop-stage" id="cropStage"><img id="cropImgEl" alt=""><div class="crop-box'+(CROP.mode==='avatar'?' round':'')+'" id="cropBox"></div>',
     CROP.mode==='banner'?'<div class="crop-safe"><span>标题文字区（会被压暗/遮住）</span></div>':'',
+    '</div>',
+    '<div class="crop-preview'+(CROP.mode==='banner'?' wide':'')+'" id="cropPreview" title="最终显示效果（所见即所得）">',
+    '<div class="cp-inner"><img id="cropPvImg" alt=""></div>',
+    CROP.mode==='banner'?'<span class="cp-overlay"><span class="cp-badge">📌 置顶推荐</span><b>标题 &amp; 信息会显示在这里</b></span>':'',
     '</div>',
     '<p class="sub" id="cropInfo" style="margin:8px 0 0"></p>'
   ].join('');
   document.body.appendChild(box);
   document.getElementById('cropCancel').onclick=function(){box.remove()};
   document.getElementById('cropSave').onclick=function(){saveCropNow()};
+  const rb=document.getElementById('cropReset');
+  if(rb)rb.onclick=function(){resetCropBox()};
 }
 function setCropImage(img){
   CROP.img=img;
@@ -1311,6 +1334,20 @@ function setCropImage(img){
   const el=document.getElementById('cropImgEl');
   el.onload=function(){initCropBox()};
   el.src=it.thumb||('/preview/'+encodeURIComponent(CROP.slug)+'/images/'+encodeURIComponent(img));
+  const pv=document.getElementById('cropPvImg');
+  if(pv){
+    pv.onload=function(){drawCropPreview()};
+    pv.src=el.src;
+  }
+}
+function cropScale(){
+  // 屏幕显示像素 → 原图像素：必须用"显示宽度"，不是 <img> 的原始像素！
+  // （预览图是 1280 长的缩略图，屏幕上只有 400~500px 宽；用 naturalWidth 会把选区缩小约 2.5~3 倍，
+  //   表现就是"我框的是整幅，保存下来只有中间一小块"）
+  return {
+    sx:(CROP.ow&&CROP.dispW)?CROP.ow/CROP.dispW:1,
+    sy:(CROP.oh&&CROP.dispH)?CROP.oh/CROP.dispH:1
+  };
 }
 function initCropBox(){
   const el=document.getElementById('cropImgEl'),boxEl=document.getElementById('cropBox');
@@ -1329,12 +1366,12 @@ function initCropBox(){
   const draw=function(){
     boxEl.style.left=CROP.x+'px';boxEl.style.top=CROP.y+'px';
     boxEl.style.width=CROP.w+'px';boxEl.style.height=CROP.h+'px';
-    const sx=(CROP.ow&&el.naturalWidth)?CROP.ow/el.naturalWidth:1;
-    const sy=(CROP.oh&&el.naturalHeight)?CROP.oh/el.naturalHeight:1;
+    const sc=cropScale();
     document.getElementById('cropInfo').textContent='选区（原图坐标）：'
-      +Math.round(CROP.x*sx)+', '+Math.round(CROP.y*sy)+' · '
-      +Math.round(CROP.w*sx)+'×'+Math.round(CROP.h*sy)+' px'
-      +(CROP.ow?'（原图 '+CROP.ow+'×'+CROP.oh+'）':'');
+      +Math.round(CROP.x*sc.sx)+', '+Math.round(CROP.y*sc.sy)+' · '
+      +Math.round(CROP.w*sc.sx)+'×'+Math.round(CROP.h*sc.sy)+' px'
+      +(CROP.ow?'（原图 '+CROP.ow+'×'+CROP.oh+'，占宽 '+Math.round(CROP.w*sc.sx/CROP.ow*100)+'%）':'');
+    drawCropPreview();
   };
   draw();
   let mode=null,sx0=0,sy0=0,c0=null;
@@ -1366,13 +1403,29 @@ function initCropBox(){
   document.addEventListener('mousemove',onMove);document.addEventListener('touchmove',onMove,{passive:false});
   document.addEventListener('mouseup',onUp);document.addEventListener('touchend',onUp);
 }
-function saveCropNow(){
+function resetCropBox(){
   const el=document.getElementById('cropImgEl');
-  const sx=(CROP.ow&&el.naturalWidth)?CROP.ow/el.naturalWidth:1;
-  const sy=(CROP.oh&&el.naturalHeight)?CROP.oh/el.naturalHeight:1;
+  if(el&&el.naturalWidth)initCropBox();
+}
+/** 选区实时预览：按"最终显示的框"裁出选区内容，所见即所得 */
+function drawCropPreview(){
+  const pv=document.getElementById('cropPreview');if(!pv)return;
+  const img=pv.querySelector('img');if(!img)return;
+  const isBanner=CROP.mode==='banner';
+  const boxW=isBanner?Math.min(420,pv.clientWidth||420):160;
+  const scale=boxW/Math.max(1,CROP.w);
+  img.style.width=(CROP.dispW*scale)+'px';
+  img.style.height=(CROP.dispH*scale)+'px';
+  img.style.left=(-CROP.x*scale)+'px';
+  img.style.top=(-CROP.y*scale)+'px';
+  const inner=pv.querySelector('.cp-inner');
+  inner.style.height=(CROP.h*scale)+'px';
+}
+function saveCropNow(){
+  const sc=cropScale();
   const payload={slug:CROP.slug,img:CROP.img,
-    x:Math.round(CROP.x*sx),y:Math.round(CROP.y*sy),
-    w:Math.round(CROP.w*sx),h:Math.round(CROP.h*sy)};
+    x:Math.round(CROP.x*sc.sx),y:Math.round(CROP.y*sc.sy),
+    w:Math.round(CROP.w*sc.sx),h:Math.round(CROP.h*sc.sy)};
   if(CROP.mode==='avatar')payload.model=CROP.model;
   toast('正在生成并重建…');
   fetch(CROP_META[CROP.mode].url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
