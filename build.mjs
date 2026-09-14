@@ -539,7 +539,7 @@ ${ADULT_GATE}
 function cardModelRow(s, rel = '', opts = {}) {
   const face = !opts.noModel && s.model ? MODEL_FACE[s.model] : ''
   const avatar = face
-    ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${face}" alt="${esc(s.model)}"></a>`
+    ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" aria-label="${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${face}" alt="${esc(s.model)}"></a>`
     : ''
   const name = (!opts.noModel && s.model)
     ? `<a class="card-model-name" href="${rel}model/${encodeURIComponent(s.model)}.html">${esc(s.model)}</a><span class="sep">·</span>`
@@ -883,7 +883,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
   // 详情页不再放模特资料（出生/身高/风格…），资料统一只在模特页展示
   const face = moreSets[0] || s
   const modelAvatar = avatarUrl(s.model, rel)
-  const modelRow = s.model ? `<a class="side-row" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品">
+  const modelRow = s.model ? `<a class="side-row" href="${rel}model/${encodeURIComponent(s.model)}.html" aria-label="${esc(s.model)} 的全部作品">
         ${modelAvatar
           ? `<span class="sr-art sr-round"><img loading="lazy" src="${modelAvatar}" alt="${esc(s.model)}"></span>`
           : `<span class="sr-art">${setCoverSrc(face)
@@ -1233,17 +1233,21 @@ img{max-width:100%;display:block}
   .hero-dots{left:14px;bottom:14px}
 }
 .badge-pin{left:8px;top:auto;bottom:8px;background:rgba(255,180,84,.92);color:#1a1206;font-weight:600}
-/* 模特行：头像 + 模特名 + 日期（点头像/名字进模特页，点日期无动作） */
+/* 模特行：头像 + 模特名 + 日期（文字平时灰一点，鼠标移上去变亮；不弹提示文字、不描蓝框） */
 .card-model{display:flex;align-items:center;gap:7px;padding:0 12px 8px;font-size:12px;color:var(--dim);
   white-space:nowrap;overflow:hidden}
 .card-avatar{flex:0 0 26px;width:26px;height:26px;border-radius:50%;overflow:hidden;display:block;
-  border:1px solid var(--line);background:var(--panel2);transition:transform .2s ease}
+  background:var(--panel2);border:0;box-shadow:0 0 0 1px rgba(255,255,255,.10);transition:transform .2s ease}
+html[data-theme="light"] .card-avatar{box-shadow:0 0 0 1px rgba(0,0,0,.07)}
 .card-avatar img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .2s ease}
 .card-avatar:hover{transform:scale(1.12)}   /* 只放大，不变色 */
-.card-model-name{color:var(--fg);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;max-width:45%}
-.card-model-name:hover{color:var(--accent)}
-.card-model .sep{opacity:.55}
-.card-model time{margin-left:auto}
+.card-model-name{color:var(--dim);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;max-width:45%;
+  transition:color .18s ease}
+.card-model time{margin-left:auto;transition:color .18s ease}
+.card-model:hover .card-model-name,.card-model:hover time{color:var(--fg)}   /* 悬停/选中：文字变亮 */
+/* 鼠标点过的链接不要再出现浏览器默认的蓝色聚焦框（键盘 Tab 仍保留可见焦点） */
+a:focus,button:focus{outline:none}
+a:focus-visible,button:focus-visible{outline:2px solid var(--line);outline-offset:2px}
 .cover-link{display:block;width:100%;height:auto;position:relative}
 .title-link{text-decoration:none;color:inherit;display:block;min-width:0}
 .pagination-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;margin:30px 0 10px}
