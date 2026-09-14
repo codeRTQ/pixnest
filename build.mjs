@@ -263,10 +263,15 @@ function avatarUrl(model, rel = '') {
  */
 const MODEL_FACE = {}
 
+/** 公开糊图的地址：带内容版本号 —— 糊图文件很小（不到 1KB），改了要立刻生效，
+    否则浏览器/边缘缓存里还是旧的那张（旧版只有 18×24 像素，放大后边缘全是方块锯齿） */
+const blurUrl = (slug, rel = '') =>
+  `${rel}blur/${encodeURIComponent(slug)}.webp${BLUR_VER ? `?v=${BLUR_VER}` : ''}`
+
 /** 一套图的封面地址（隐藏套图→用公开的模糊小图，公开目录里没有它的路径） */
 function setCoverUrl(s, rel = '') {
   if (!s) return ''
-  if (s.hidden) return s.blurThumb ? `${rel}blur/${encodeURIComponent(s.slug)}.webp` : ''
+  if (s.hidden) return s.blurThumb ? blurUrl(s.slug, rel) : ''
   if (!s.coverFile) return ''
   return `${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}`
 }
@@ -473,6 +478,10 @@ function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
 // ─────────────────────────── 模板 ───────────────────────────
 /** 全站是否真的有隐藏套图（决定要不要在头部显示 🔒 入口）；由主流程赋值 */
 let hiddenCountGlobal = 0
+/** 随便挑一个隐藏套图的 slug：详情页没有锁定卡片时，用它在浏览器端校验密码；由主流程赋值 */
+let lockSlugGlobal = ''
+/** 公开糊图的版本号（内容变了就换 URL，避免旧糊图被缓存住不放）；由主流程赋值 */
+let BLUR_VER = ''
 
 const layout = ({ title, desc, body, rel = '', nav = '', pswp = false, og = null, canonical = '', jsonld = '', noindex = false }) => `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -532,7 +541,7 @@ ${ADULT_GATE}
   </div>
 </footer>
 <script src="${rel}assets/app.js?v=${ASSET_V}" defer></script>
-<script>window.PN_REL=${JSON.stringify(rel)};window.PN_HIDDEN_HINT=${JSON.stringify(HIDDEN_HINT)};</script>
+<script>window.PN_REL=${JSON.stringify(rel)};window.PN_HIDDEN_HINT=${JSON.stringify(HIDDEN_HINT)};window.PN_LOCK_SLUG=${JSON.stringify(lockSlugGlobal)};</script>
 </body>
 </html>`
 
@@ -555,7 +564,7 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   // 隐藏但没配密码（构建时算不出私有地址）→ 只给一张糊图，没有任何入口
   ? `<article class="card card-locked" data-hid="${esc(s.slug)}">
   <div class="card-cover locked"${s.coverLqip ? ` style="background-image:url(${s.coverLqip})"` : ''}>
-    ${s.blurThumb ? `<img class="blurred" src="${rel}blur/${esc(s.slug)}.webp" alt="">` : '<div class="no-cover">🔒</div>'}
+    ${s.blurThumb ? `<img class="blurred" src="${blurUrl(s.slug, rel)}" alt="">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
   </div>
   <h2 class="card-title">${esc(s.title)}</h2>
@@ -565,7 +574,7 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   : s.hiddenOk
   ? `<article class="card card-locked" data-hid="${esc(s.slug)}"${s.blurThumb ? ` data-cover="${esc(s.coverThumb || '')}"` : ''}>
   <div class="card-cover locked"${s.coverLqip ? ` style="background-image:url(${s.coverLqip})"` : ''}>
-    ${s.blurThumb ? `<img class="blurred"${opts.eager ? '' : ' loading="lazy"'} src="${rel}blur/${esc(s.slug)}.webp" alt="${esc(s.title)}">` : '<div class="no-cover">🔒</div>'}
+    ${s.blurThumb ? `<img class="blurred"${opts.eager ? '' : ' loading="lazy"'} src="${blurUrl(s.slug, rel)}" alt="${esc(s.title)}">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
   </div>
   <h2 class="card-title">${esc(s.title)}</h2>
@@ -636,7 +645,7 @@ function heroHtml(pinned, rel = '') {
   if (!pinned.length) return ''
   // 轮播大图：后台裁过 Banner 就用 Banner（默认仍用封面）；隐藏图集用公开的模糊小图
   const pic = (s) => s.hidden
-    ? (s.blurThumb ? { f: `../blur/${encodeURIComponent(s.slug)}.webp`, v: '', banner: false, locked: true } : null)
+    ? (s.blurThumb ? { f: blurUrl(s.slug, '../'), v: '', banner: false, locked: true } : null)
     : (s.bannerThumb ? { f: 'thumbs/' + s.bannerThumb, v: s.thumbVer[s.bannerThumb], banner: true }
       : (s.coverThumb ? { f: 'thumbs/' + s.coverThumb, v: s.thumbVer[s.coverThumb], banner: false }
         : (s.coverFile ? { f: s.coverFile, v: '', banner: false } : null)))
@@ -644,7 +653,7 @@ function heroHtml(pinned, rel = '') {
   const unlockCover = (s) => s.bannerThumb || s.coverThumb || ''
   const slides = pinned.map((s, i) => {
     const p = pic(s)
-    const img = p ? `<img class="${p.locked ? 'blurred' : p.banner ? 'is-banner' : ''}" src="${s.hidden ? `${rel}blur/${encodeURIComponent(s.slug)}.webp` : `${rel}set/${s.slug}/${p.f}${verQ(p.v)}`}" alt="${esc(s.title)}"${i ? ' loading="lazy"' : ''}>` : ''
+    const img = p ? `<img class="${p.locked ? 'blurred' : p.banner ? 'is-banner' : ''}" src="${s.hidden ? blurUrl(s.slug, rel) : `${rel}set/${s.slug}/${p.f}${verQ(p.v)}`}" alt="${esc(s.title)}"${i ? ' loading="lazy"' : ''}>` : ''
     const info = `
       <span class="hero-info">
         <span class="hero-badge">${s.hidden ? '🔒 置顶 · 隐藏' : '📌 置顶推荐'}</span>
@@ -678,7 +687,7 @@ function heroHtml(pinned, rel = '') {
           ? ` data-hid="${esc(s.slug)}"${unlockCover(s) ? ` data-cover="${esc(unlockCover(s))}"` : ''}`
           : ` href="${rel}set/${s.slug}/index.html"`} data-i="${i}">
           ${s.hidden
-            ? (s.blurThumb ? `<img class="blurred" src="${rel}blur/${encodeURIComponent(s.slug)}.webp" alt="" loading="lazy">` : '')
+            ? (s.blurThumb ? `<img class="blurred" src="${blurUrl(s.slug, rel)}" alt="" loading="lazy">` : '')
             : (s.coverFile ? `<img src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="" loading="lazy">` : '')}
           <span class="hero-item-text"><b>${s.hidden ? '🔒 ' : ''}${esc(s.title)}</b><span>${s.hidden
             ? '隐藏图集 · 输入密码查看'
@@ -896,7 +905,7 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
   // 指向另一套图的链接/封面：隐藏的套图不能直接给路径（算不出来），交给页面上的解锁脚本处理
   const setHref = (x) => (x.hidden ? '' : `${rel}set/${x.slug}/index.html`)
   const setCoverSrc = (x) => x.hidden
-    ? (x.blurThumb ? `${rel}blur/${encodeURIComponent(x.slug)}.webp` : '')
+    ? (x.blurThumb ? blurUrl(x.slug, rel) : '')
     : (x.coverFile ? `${rel}set/${x.slug}/${x.coverThumb ? 'thumbs/' + x.coverThumb + verQ(x.thumbVer[x.coverThumb]) : x.coverFile}` : '')
   // 模特行：头像（后台设了就用圆形头像，否则用该模特另一套的封面）+ 名字 + 套数 → 点进模特页
   // 详情页不再放模特资料（出生/身高/风格…），资料统一只在模特页展示
@@ -1132,7 +1141,7 @@ img{max-width:100%;display:block}
 .card-cover{position:relative;aspect-ratio:3/4;background:var(--panel2) center/cover no-repeat;overflow:hidden}
 .card-cover img{width:100%;height:100%;object-fit:cover;transition:transform .35s ease}
 .card:hover .card-cover img{transform:scale(1.06)}
-.card:hover .card-cover img.blurred{transform:scale(1.22)}   /* 隐藏卡的糊图：放大但保持模糊 */
+.card:hover .card-cover img.blurred{transform:scale(1.08)}   /* 隐藏卡的糊图：放大但保持模糊 */
 .no-cover{display:flex;align-items:center;justify-content:center;height:100%;color:var(--dim)}
 .badge{position:absolute;top:6px;left:6px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;padding:1px 7px;border-radius:999px}
 .badge-size{left:auto;right:6px;background:rgba(91,140,255,.85)}
@@ -1153,7 +1162,11 @@ img{max-width:100%;display:block}
 /* ── 隐藏套图：只给一张糊图，点不进去；输密码后才变成正常卡片 ── */
 .card-locked{cursor:default}
 .card-locked .card-cover{background:#0d1017}
-.card-locked .card-cover .blurred,.blurred{filter:blur(14px) saturate(.75) brightness(.85);transform:scale(1.15)}
+/* 糊图：模糊基本已经"烤"进图片里了（admin 生成时压到 120px + 高斯 6，放大 5 倍也看不出内容），
+   这里只补 2px 兜底，并且只放大 6% —— 模糊取样不会越过图片边界，
+   四周就不会出现一圈发暗/发虚的硬边（之前 blur14 + scale1.15，边缘白边和方块锯齿很明显） */
+.card-locked .card-cover .blurred,.blurred{filter:blur(2px) saturate(.8) brightness(.92);transform:scale(1.06);
+  transform-origin:center;backface-visibility:hidden}
 .card-locked .card-title{color:var(--dim)}
 .card-locked .card-meta{justify-content:space-between}
 .badge-lock{background:rgba(0,0,0,.66);color:#ffd9a0;border:1px solid rgba(255,180,84,.45)}
@@ -1170,6 +1183,7 @@ img{max-width:100%;display:block}
 [data-hid].unlocked img.blurred{filter:none;transform:none}
 .side-set.is-hidden.unlocked{opacity:1;cursor:pointer}
 .pn.locked{opacity:.75}
+[data-hid].unlocked{cursor:pointer}   /* 详情页"上一套/下一套（隐藏）"解锁后也能点 */
 .pn.locked span{color:var(--dim)}
 .pn.locked.unlocked{cursor:pointer;opacity:1}
 /* 轻提示（隐藏套图解锁用） */
@@ -1219,7 +1233,7 @@ img{max-width:100%;display:block}
   border:1px solid rgba(255,180,84,.55);background:rgba(255,180,84,.92);color:#1a1206;font-weight:600}
 .hero-unlock:hover{filter:brightness(1.08)}
 .hero-item.is-hidden{cursor:default}
-.hero-item.is-hidden img{filter:blur(6px) saturate(.8)}
+.hero-item.is-hidden img{filter:blur(2px) saturate(.85);transform:scale(1.06)}
 .hero-item.is-hidden.unlocked{cursor:pointer}
 .hero-item.is-hidden.unlocked img{filter:none}
 .hero-slide img{width:100%;height:100%;object-fit:cover;object-position:center 22%;display:block}
@@ -1596,49 +1610,82 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
   var probe = function (url) {
     return fetch(url, { method: 'HEAD' }).then(function (r) { return r.ok; }).catch(function () { return false; });
   };
+  // 解锁一个元素：糊图换成真封面、角标/按钮改成已解锁状态、补上入口（不跳转）
+  var upgradeEl = function (el, url) {
+    el.classList.add('unlocked');
+    el.setAttribute('data-url', url);
+    var cov = el.getAttribute('data-cover');
+    var img = el.querySelector('img.blurred');
+    if (img && cov) {
+      img.src = url + 'thumbs/' + cov;                    // 换真封面
+      img.classList.remove('blurred');                    // 摘掉糊图类：模糊/放大/悬停倍率全部回到普通卡片
+    }
+    var badge = el.querySelector('.badge-lock');
+    if (badge) badge.textContent = '🔓 已解锁';
+    var hint = el.querySelector('.lock-hint');
+    if (hint) hint.textContent = '已解锁';
+    var btn = el.querySelector('.unlock-btn');
+    if (btn) btn.textContent = '🔓 查看这套图';
+    var hb = el.querySelector('.hero-badge');
+    if (hb) hb.textContent = '📌 置顶推荐';
+    if (el.classList.contains('pn')) {                    // 详情页「上一套/下一套（隐藏）」
+      el.classList.remove('locked');
+      var sp = el.querySelector('span');
+      if (sp) sp.textContent = sp.textContent.replace('🔒', '🔓');
+    }
+    // 原本没有 href 的入口（轮播大图 / 缩略条）补上地址
+    if (el.tagName === 'A' && !el.getAttribute('href')) el.setAttribute('href', url + 'index.html');
+  };
+  // 页面上所有锁着的封面一起解锁（不限制数量：一页可能有几十张隐藏卡，
+  // 之前只处理前 24 个，所以输完密码还留着一半是糊的）
   var unlockCards = function () {
-    var pw = HN.pw(); if (!pw) return;
-    var nodes = [].slice.call(document.querySelectorAll('[data-hid]'));
-    if (!nodes.length) return;
-    nodes.slice(0, 24).forEach(function (el) {
-      var slug = el.getAttribute('data-hid'); if (!slug) return;
-      urlFor(slug, pw).then(function (url) {
-        return probe(url).then(function (ok) {
-          if (!ok) { HN.forget(); return; }        // 密码改过了 → 清掉本地记忆，回到锁定状态
-          el.classList.add('unlocked');
-          el.setAttribute('data-url', url);
-          var img = el.querySelector('img.blurred');
-          var cov = el.getAttribute('data-cover');
-          if (img && cov && url) img.src = url + 'thumbs/' + cov;
-          var btn = el.querySelector('.unlock-btn');
-          if (btn) btn.textContent = '🔓 查看这套图';
-          var a = el.querySelector('a.card-link');
-          if (!a && el.tagName === 'A' && !el.getAttribute('href')) el.setAttribute('href', url);
-          if (!a && el.tagName === 'A' && el.classList.contains('hero-item')) el.setAttribute('href', url);
-          if (el.classList.contains('hero-slide')) { var hb = el.querySelector('.hero-badge'); if (hb) hb.textContent = '📌 置顶推荐'; }
-        });
-      });
-    });
+    var pw = HN.pw(); if (!pw) return Promise.resolve(0);
+    var nodes = [].slice.call(document.querySelectorAll('[data-hid]:not(.unlocked)'));
+    if (!nodes.length) return Promise.resolve(0);
+    var done = 0, bad = 0;
+    var step = function (i) {
+      if (i >= nodes.length) {
+        // 一个都没通过 → 密码多半被改过了，清掉本地记忆，回到锁定状态
+        if (!done && bad) HN.forget();
+        return Promise.resolve(done);
+      }
+      var batch = nodes.slice(i, i + 6);
+      return Promise.all(batch.map(function (el) {
+        var slug = el.getAttribute('data-hid'); if (!slug) return null;
+        return urlFor(slug, pw).then(function (url) {
+          return probe(url).then(function (ok) {
+            if (ok) { upgradeEl(el, url); done++; } else bad++;
+          });
+        }).catch(function () { bad++; });
+      })).then(function () { return step(i + 6); });
+    };
+    return step(0);
   };
-  var goHidden = function (slug, pw) {
-    return urlFor(slug, pw).then(function (url) {
-      return probe(url).then(function (ok) {
-        if (!ok) return false;
-        HN.save(pw);
-        location.href = url;
-        return true;
-      });
-    });
-  };
+  // 客户端渲染出来的卡片（搜索/排序后重画）也要跟着解锁
+  window.PN_unlockCards = unlockCards;
   var askHidden = function (slug) {
-    var pw = window.prompt(HN.hint);
+    var keep = HN.pw();
+    var pw = window.prompt(HN.hint + (keep ? '（直接回车＝用这台设备记住的密码）' : ''), keep || '');
+    if (pw === null) return;
+    pw = String(pw).trim() || keep;
     if (!pw) return;
     toast('正在校验密码…');
-    goHidden(slug, pw).then(function (ok) {
-      if (ok) return;
-      var again = window.confirm('密码不对，重新输入？');
-      if (again) askHidden(slug);
-      else toast('已取消', false);
+    sha16(pw + '|' + slug).then(function (tok) {
+      var url = HN.rel + 'h/' + tok + '/';
+      return probe(url).then(function (ok) {
+        if (!ok) {
+          HN.forget();
+          if (window.confirm('密码不对，重新输入？')) askHidden(slug);
+          else toast('已取消', false);
+          return;
+        }
+        HN.save(pw);
+        // 故意不跳详情页：就地解锁，用户自己点卡片进（这样能连着看下一套）
+        toast(document.querySelector('[data-hid]')
+          ? '✓ 密码正确，已解锁（本机记住）'
+          : '✓ 密码正确，已记住（回到列表即可查看）', true);
+        unlockCards();
+      });
     }).catch(function () { toast('当前浏览器不支持（需要 HTTPS）', false); });
   };
   document.addEventListener('click', function (e) {
@@ -1659,12 +1706,11 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
   });
   var lockBtn = document.getElementById('lockBtn');
   if (lockBtn) lockBtn.addEventListener('click', function () {
-    var pw = window.prompt(HN.hint, HN.pw() ? '' : '');
-    if (!pw) return;
-    // 用页面上任意一个隐藏套图来验证密码；没有锁定卡片时（比如详情页）就直接记住
+    // 页面上的锁定卡片用来校对密码；详情页（没有锁定卡片）用构建时写进来的第一个隐藏套图 slug
     var any = document.querySelector('[data-hid]');
-    if (!any) { HN.save(pw); toast('密码已记住，回到列表即可打开隐藏图集', true); return; }
-    goHidden(any.getAttribute('data-hid'), pw).then(function (ok) { if (!ok) toast('密码不对', false); });
+    var slug = (any && any.getAttribute('data-hid')) || window.PN_LOCK_SLUG || '';
+    if (!slug) { toast('本站没有隐藏套图', false); return; }
+    askHidden(slug);
   });
   unlockCards();
 
@@ -1702,7 +1748,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         + '<time>' + esc(String(s.date || '').replace(/-/g, '/')) + '</time>';
     };
     const cardHtml = (s) => s.locked ? [
-      '<article class="card card-locked" data-hid="' + esc(s.slug) + '" data-cover="cover.webp">',
+      '<article class="card card-locked" data-hid="' + esc(s.slug) + '" data-cover="' + esc(s.cthumb || '') + '">',
       '<div class="card-cover locked">',
       (s.cover ? '<img class="blurred" loading="lazy" src="' + base + s.cover + '" alt="' + esc(s.title) + '">' : '<div class="no-cover">🔒</div>'),
       '<span class="badge badge-lock">🔒 隐藏</span>',
@@ -1831,11 +1877,12 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       const renderList = (q) => {
         const all = applySort(INDEX.sets.filter(s => hits(s, q)));
         // 客户端分页：沿用同一套 Bootstrap 分页类名，搜索结果多时不再一屏铺完
-        const PER = 30;   // 与 setsPerPage 一致：30 能被 5（桌面）/3（平板）/2（手机）整除，每页都是整行
+        const PER = 20;   // 与 setsPerPage 一致：20 能被 5（桌面）/2（手机）整除，每页都是整行
         const pages = Math.max(1, Math.ceil(all.length / PER));
         if (curPage > pages) curPage = 1;
         const list = all.slice((curPage - 1) * PER, curPage * PER);
         grid.innerHTML = list.map(cardHtml).join('');
+        if (typeof window.PN_unlockCards === 'function') window.PN_unlockCards();   // 重画后跟着解锁
         const head = document.querySelector('.page-head');
         const hero = document.getElementById('hero');
         if (hero) hero.hidden = !!q;                       // 搜索/筛选时先收起推荐轮播
@@ -2337,6 +2384,15 @@ function build() {
   const sets = slugs.map(readSet).filter(Boolean)
     .sort((a, b) => cmpDateDesc(a, b))
   hiddenCountGlobal = sets.filter(s => s.hiddenOk).length
+  lockSlugGlobal = (sets.find(s => s.hiddenOk) || {}).slug || ''
+  // 糊图版本号：按每套糊图的大小+修改时间算一个短哈希（有变动就整体换 URL）
+  {
+    const stamp = sets.filter(s => s.hidden).map(s => {
+      const f = s.blurThumb ? join(s.dir, 'thumbs', s.blurThumb) : (s.blurFile ? join(s.dir, s.blurFile) : '')
+      try { const st = statSync(f); return s.slug + ':' + st.size + ':' + Math.round(st.mtimeMs) } catch { return s.slug }
+    }).join('|')
+    BLUR_VER = createHash('sha1').update(stamp).digest('hex').slice(0, 8)
+  }
   // 页脚用的整站体量文案（跟分页无关，一次算好给 layout 用）
   {
     const bytes = sets.reduce((n, s) => n + (s.bytes || 0), 0)
@@ -2584,10 +2640,11 @@ function build() {
       size: s.hidden ? '' : s.sizeText, bytes: s.hidden ? 0 : s.bytes,
       pinned: !!s.pinned && !s.hidden, pinOrder: s.pinOrder || 0,
       locked: !!s.hidden,
+      cthumb: s.hidden ? (s.coverThumb || '') : '',        // 解锁后要换上的真封面文件名（隐藏项不提前暴露路径）
       dupTag: s.dupTag || '',
       face: s.model ? (MODEL_FACE[s.model] || '') : '',   // 卡片模特行的头像（客户端渲染要用）
       cover: s.hidden
-        ? (s.blurThumb || s.blurFile ? `blur/${s.slug}.webp` : '')
+        ? (s.blurThumb || s.blurFile ? blurUrl(s.slug, '') : '')
         : (s.coverThumb ? `set/${s.slug}/thumbs/${s.coverThumb}${verQ(s.thumbVer[s.coverThumb])}` : (s.coverFile ? `set/${s.slug}/${s.coverFile}` : '')),
     })),
   }, null, 2))

@@ -2588,22 +2588,29 @@ def set_hidden(slug, on, own_pw=None):
 
 
 def make_blur(set_dir):
-    """公开的模糊小图：压到 24px + 高斯模糊，肉眼只剩色块（放在 sets/<slug>/blur.jpg 与 thumbs/blur.webp）"""
+    """公开的模糊小图：压到 120px 再整体高斯模糊，肉眼认不出画面，只剩一团柔和的色光。
+
+    尺寸别太小：卡片上的糊图要放大到 ~215×287（手机 ~180×240、轮播更宽），
+    原来压到 24px 时一个像素被拉成十几个像素，放大后边缘会出现明显的方块锯齿，
+    而且模糊半径盖不住 -> 边缘发虚发脏。120px 底图自带 6px 高斯模糊，
+    浏览器端再补一点点模糊就足够顺滑了（文件仍然只有几 KB）。
+    产物：sets/<slug>/blur.jpg 与 sets/<slug>/thumbs/blur.webp
+    """
     from PIL import ImageFilter
     cover = next((f for f in ('cover.jpg', 'cover.jpeg', 'cover.png', 'cover.webp')
                   if os.path.exists(os.path.join(set_dir, f))), None)
     if not cover:
         return None
     im = ImageOps.exif_transpose(Image.open(os.path.join(set_dir, cover))).convert('RGB')
-    im.thumbnail((24, 24), Image.LANCZOS)
-    im = im.filter(ImageFilter.GaussianBlur(2.2))
+    im.thumbnail((120, 120), Image.LANCZOS)
+    im = im.filter(ImageFilter.GaussianBlur(6))
     out = os.path.join(set_dir, 'blur.jpg')
-    im.save(out, 'JPEG', quality=62)
+    im.save(out, 'JPEG', quality=68)
     tdir = os.path.join(set_dir, 'thumbs')
     os.makedirs(tdir, exist_ok=True)
     if WEBP_ENABLED:
         try:
-            im.save(os.path.join(tdir, 'blur.webp'), 'WEBP', quality=62, method=6)
+            im.save(os.path.join(tdir, 'blur.webp'), 'WEBP', quality=68, method=6)
         except Exception:  # noqa
             pass
     return out
