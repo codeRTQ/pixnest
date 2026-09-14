@@ -1116,6 +1116,8 @@ img{max-width:100%;display:block}
 .header-search input:focus{border-color:var(--accent)}
 .icon-btn{width:38px;height:38px;flex:0 0 auto;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font-size:16px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 .icon-btn:hover{border-color:var(--accent)}
+/* 头部 🔒 按钮：已解锁时显示 🔓 并高亮，再点一下就是"重新上锁" */
+.icon-btn.on{border-color:var(--accent);background:rgba(91,140,255,.14);color:var(--accent)}
 /* 系列标签云 */
 .chips-cloud{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 22px}
 .cloud-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg);text-decoration:none;font-size:13px}
@@ -1611,30 +1613,96 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     return fetch(url, { method: 'HEAD' }).then(function (r) { return r.ok; }).catch(function () { return false; });
   };
   // 解锁一个元素：糊图换成真封面、角标/按钮改成已解锁状态、补上入口（不跳转）
+  // 顺手把"原样"记在 data-* 上，重新上锁时才能一模一样地还原
+  var keepText = function (el, key, node) {
+    if (node && !el.hasAttribute(key)) el.setAttribute(key, node.textContent);
+  };
+  var keepAttr = function (el, key, val) {
+    if (!el.hasAttribute(key)) el.setAttribute(key, val == null ? '' : String(val));
+  };
+  var setText = function (el, sel, text) {
+    var n = el.querySelector(sel);
+    if (n) n.textContent = text;
+  };
   var upgradeEl = function (el, url) {
     el.classList.add('unlocked');
     el.setAttribute('data-url', url);
     var cov = el.getAttribute('data-cover');
     var img = el.querySelector('img.blurred');
-    if (img && cov) {
-      img.src = url + 'thumbs/' + cov;                    // 换真封面
-      img.classList.remove('blurred');                    // 摘掉糊图类：模糊/放大/悬停倍率全部回到普通卡片
+    if (img) {
+      keepAttr(el, 'data-blursrc', img.getAttribute('src'));
+      if (cov) {
+        img.src = url + 'thumbs/' + cov;                  // 换真封面
+        img.classList.remove('blurred');                  // 摘掉糊图类：模糊/放大/悬停倍率全部回到普通卡片
+      }
     }
-    var badge = el.querySelector('.badge-lock');
-    if (badge) badge.textContent = '🔓 已解锁';
-    var hint = el.querySelector('.lock-hint');
-    if (hint) hint.textContent = '已解锁';
-    var btn = el.querySelector('.unlock-btn');
-    if (btn) btn.textContent = '🔓 查看这套图';
-    var hb = el.querySelector('.hero-badge');
-    if (hb) hb.textContent = '📌 置顶推荐';
+    keepText(el, 'data-badge', el.querySelector('.badge-lock'));
+    keepText(el, 'data-herobadge', el.querySelector('.hero-badge'));
+    keepText(el, 'data-meta', el.querySelector('.hero-meta'));
+    keepText(el, 'data-b', el.querySelector('.hero-item-text b'));
+    keepText(el, 'data-sub', el.querySelector('.hero-item-text span'));
+    keepText(el, 'data-hint', el.querySelector('.lock-hint'));
+    setText(el, '.badge-lock', '🔓 已解锁');
+    setText(el, '.lock-hint', '已解锁');
+    setText(el, '.unlock-btn', '🔓 查看这套图');
+    setText(el, '.hero-badge', '📌 置顶推荐');
+    setText(el, '.hero-meta', '已解锁，点开就能看');
+    var b = el.querySelector('.hero-item-text b');
+    if (b) b.textContent = b.textContent.replace(/^🔒\\s*/, '');
+    setText(el, '.hero-item-text span', '已解锁 · 点击查看');
     if (el.classList.contains('pn')) {                    // 详情页「上一套/下一套（隐藏）」
       el.classList.remove('locked');
       var sp = el.querySelector('span');
       if (sp) sp.textContent = sp.textContent.replace('🔒', '🔓');
     }
     // 原本没有 href 的入口（轮播大图 / 缩略条）补上地址
-    if (el.tagName === 'A' && !el.getAttribute('href')) el.setAttribute('href', url + 'index.html');
+    if (el.tagName === 'A' && !el.getAttribute('href')) {
+      el.setAttribute('href', url + 'index.html');
+      el.setAttribute('data-addedhref', '1');
+    }
+  };
+  // 重新上锁：把解锁过的元素按 data-* 里记下的原样还原（糊图、角标、按钮文字、入口）
+  var downgradeEl = function (el) {
+    el.classList.remove('unlocked');
+    el.removeAttribute('data-url');
+    var img = el.querySelector('img');
+    var src = el.getAttribute('data-blursrc');
+    if (img && src) { img.src = src; img.classList.add('blurred'); }
+    el.removeAttribute('data-blursrc');
+    var restore = function (key, sel) {
+      var v = el.getAttribute(key);
+      if (v !== null) setText(el, sel, v);
+      el.removeAttribute(key);
+    };
+    restore('data-badge', '.badge-lock');
+    restore('data-herobadge', '.hero-badge');
+    restore('data-meta', '.hero-meta');
+    restore('data-b', '.hero-item-text b');
+    restore('data-sub', '.hero-item-text span');
+    restore('data-hint', '.lock-hint');
+    if (el.classList.contains('pn')) {
+      el.classList.add('locked');
+      var sp = el.querySelector('span');
+      if (sp) sp.textContent = sp.textContent.replace('🔓', '🔒');
+    }
+    if (el.getAttribute('data-addedhref')) { el.removeAttribute('href'); el.removeAttribute('data-addedhref'); }
+    setText(el, '.unlock-btn', '🔓 输入密码查看');   // 按钮文字也要回到"输密码"状态
+  };
+  // 头部 🔒/🔓 按钮：跟着"本机是否记住密码"换样式，已经解锁时点它就是重新上锁
+  var syncLockBtn = function () {
+    var b = document.getElementById('lockBtn');
+    if (!b) return;
+    var on = !!HN.pw();
+    b.textContent = on ? '🔓' : '🔒';
+    b.title = on ? '已解锁 · 点击重新上锁（本机忘记密码）' : '输入密码查看隐藏图集';
+    if (on) b.classList.add('on'); else b.classList.remove('on');
+  };
+  var relock = function () {
+    var nodes = [].slice.call(document.querySelectorAll('[data-hid].unlocked'));
+    HN.forget();
+    nodes.forEach(downgradeEl);
+    syncLockBtn();
+    toast('🔒 已重新上锁：封面恢复模糊，本机也忘了密码', true);
   };
   // 页面上所有锁着的封面一起解锁（不限制数量、并发探测：
   // 之前只处理前 24 个，一页 30 张时输完密码还留着一半是糊的）
@@ -1679,7 +1747,8 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         HN.save(pw);
         // 故意不跳详情页：就地解锁，用户自己点卡片进（这样能连着看下一套）
         unlockCards().then(function (n) {
-          toast(n ? '✓ 已解锁 ' + n + ' 套（本机记住密码）'
+          syncLockBtn();
+          toast(n ? '✓ 已解锁 ' + n + ' 套（右上角 🔓 可重新上锁）'
                   : '✓ 密码正确，已记住（回到列表即可查看）', true);
         });
       });
@@ -1703,13 +1772,15 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
   });
   var lockBtn = document.getElementById('lockBtn');
   if (lockBtn) lockBtn.addEventListener('click', function () {
+    if (HN.pw()) { relock(); return; }        // 已解锁：再点一下就是重新上锁
     // 页面上的锁定卡片用来校对密码；详情页（没有锁定卡片）用构建时写进来的第一个隐藏套图 slug
     var any = document.querySelector('[data-hid]');
     var slug = (any && any.getAttribute('data-hid')) || window.PN_LOCK_SLUG || '';
     if (!slug) { toast('本站没有隐藏套图', false); return; }
     askHidden(slug);
   });
-  unlockCards();
+  syncLockBtn();
+  unlockCards().then(syncLockBtn);
 
   // ── 随便看看：从索引随机跳一套 ──
   const randBtn = document.getElementById('randomBtn');
