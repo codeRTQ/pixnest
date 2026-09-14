@@ -717,7 +717,6 @@ function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets
   ${heroHtml(pinned, rel)}
   <div class="page-head" hidden></div>
   <div class="filters" id="filters">
-    <span class="filter-label">排序</span>
     <span class="sort-chips" id="sortChips" role="group" aria-label="排序方式">
       <button type="button" class="on" data-sort="date-desc">最新发布</button>
       <button type="button" data-sort="date-asc">最早发布</button>
@@ -1105,7 +1104,7 @@ function pageUrl(path) {
 }
 
 // ─────────────────────────── 资源 ───────────────────────────
-const STYLE = `:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--line:#2a2f3a;--fg:#e8ebf0;--dim:#98a1b3;--accent:#5b8cff;--accent2:#ffb454;--radius:12px;--header-bg:rgba(15,17,21,.9)}
+const STYLE = `:root{--header-h:65px;--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--line:#2a2f3a;--fg:#e8ebf0;--dim:#98a1b3;--accent:#5b8cff;--accent2:#ffb454;--radius:12px;--header-bg:rgba(15,17,21,.9)}
 html[data-theme="light"]{--bg:#f6f7f9;--panel:#fff;--panel2:#eef1f5;--line:#dde2ea;--fg:#1b1f27;--dim:#5d6879;--accent:#2f6bff;--accent2:#b3651a;--header-bg:rgba(246,247,249,.92)}
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -1211,8 +1210,10 @@ img{max-width:100%;display:block}
 .page-head.model-head h1{display:flex;align-items:center;gap:12px}
 .card-meta a.tag:hover,.detail-meta a.tag:hover{color:var(--accent);border-color:var(--accent);background:rgba(91,140,255,.12)}
 .pager{display:flex;align-items:center;justify-content:center;gap:18px;margin:34px 0}
-/* 筛选栏 */
-.filters{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 16px}
+/* 筛选栏：跟着页面往下滚时贴住头部下方（吸顶），方便一边看一边换排序/去掉筛选。
+   头部高度会随屏幕变化，由脚本量好写进 --header-h */
+.filters{position:sticky;top:var(--header-h,65px);z-index:15;background:var(--bg);
+  display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 6px;padding:12px 0}
 .filters select{padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;cursor:pointer}
 /* 排序标签：与"快捷筛选"同一行的 chip 组，中间用竖线隔开 */
 .sort-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -1594,6 +1595,16 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
   else root.setAttribute('data-theme', matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   const themeBtn = document.getElementById('themeBtn');
   if (themeBtn) themeBtn.addEventListener('click', () => setTheme(root.getAttribute('data-theme') === 'light' ? 'dark' : 'light'));
+
+  // ── 排序栏吸顶：正好贴在头部下沿（头部高度手机上会变高，量出来写进 --header-h）──
+  (function () {
+    const head = document.querySelector('.site-header');
+    if (!head) return;
+    const sync = () => root.style.setProperty('--header-h', Math.round(head.getBoundingClientRect().height) + 'px');
+    sync();
+    addEventListener('resize', sync, { passive: true });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(sync).catch(() => {});
+  })();
 
   // ── 隐藏套图解锁 ──
   // 地址 = h/<sha256(密码 + '|' + slug) 前 16 位>/，所以浏览器这边也要能算同一个哈希；
