@@ -256,6 +256,20 @@ function avatarUrl(model, rel = '') {
   return `${rel}assets/avatar/${encodeURIComponent(f)}${verQ(fileVer(join(dir, f)))}`
 }
 
+/**
+ * 卡片角标上用的模特头像（站根相对路径，不带 rel）：优先后台裁的自定义头像，
+ * 没有就用该模特最新一套**公开**图集的封面当头像。由主流程在渲染前填好。
+ */
+const MODEL_FACE = {}
+
+/** 一套图的封面地址（隐藏套图→用公开的模糊小图，公开目录里没有它的路径） */
+function setCoverUrl(s, rel = '') {
+  if (!s) return ''
+  if (s.hidden) return s.blurThumb ? `${rel}blur/${encodeURIComponent(s.slug)}.webp` : ''
+  if (!s.coverFile) return ''
+  return `${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}`
+}
+
 /** 模特圆形头像（后台从该模特任意一套图里裁剪生成）：没有就返回空串，页面自动退回封面 */
 function avatarHtml(model, rel = '', size = 'sm', cls = '') {
   const u = avatarUrl(model, rel)
@@ -521,7 +535,7 @@ const card = (s, rel = '', noModel = false) => (s.hidden && !s.hiddenOk)
   <div class="card-cover locked">
     ${s.blurThumb ? `<img class="blurred" src="${rel}blur/${esc(s.slug)}.webp" alt="">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
-    ${s.model && !noModel ? `<span class="badge badge-model" title="模特：${esc(s.model)}">👤 ${esc(s.model)}</span>` : ''}
+    ${s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
   </div>
   <h2 class="card-title">${esc(s.title)}</h2>
   <div class="card-meta"><span class="lock-hint">还没设置隐藏密码</span></div>
@@ -531,7 +545,7 @@ const card = (s, rel = '', noModel = false) => (s.hidden && !s.hiddenOk)
   <div class="card-cover locked">
     ${s.blurThumb ? `<img class="blurred" src="${rel}blur/${esc(s.slug)}.webp" alt="${esc(s.title)}">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
-    ${s.model && !noModel ? `<span class="badge badge-model" title="模特：${esc(s.model)}">👤 ${esc(s.model)}</span>` : ''}
+    ${s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
   </div>
   <h2 class="card-title">${esc(s.title)}</h2>
   <div class="card-meta">
@@ -542,18 +556,18 @@ const card = (s, rel = '', noModel = false) => (s.hidden && !s.hiddenOk)
 </article>`
   : `
 <article class="card" data-title="${esc((s.displayTitle + ' ' + s.model + ' ' + s.tags.join(' ')).toLowerCase())}">
-  <a class="card-link" href="${rel}set/${s.slug}/index.html">
-    <div class="card-cover">
+  <div class="card-cover">
+    <a class="card-link cover-link" href="${rel}set/${s.slug}/index.html" aria-label="${esc(s.title)}">
       ${s.coverFile
         ? `<img loading="lazy" src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="${esc(s.title)}">`
         : `<div class="no-cover">无封面</div>`}
       <span class="badge">${s.imageCount}P</span>
       ${s.sizeText ? `<span class="badge badge-size" title="原图总大小 ${esc(s.sizeText)}">${esc(s.sizeText)}</span>` : (s.packSize ? `<span class="badge badge-size">${esc(s.packSize)}</span>` : '')}
       ${s.pinned ? '<span class="badge badge-pin" title="置顶推荐">📌 置顶</span>' : ''}
-      ${s.model && !noModel ? `<span class="badge badge-model" title="模特：${esc(s.model)}">👤 ${esc(s.model)}</span>` : ''}
-    </div>
-    <h2 class="card-title">${esc(s.title)}</h2>
-  </a>
+    </a>
+    ${s.model && MODEL_FACE[s.model] ? `<a class="card-avatar" href="${rel}model/${encodeURIComponent(s.model)}.html" title="查看 ${esc(s.model)} 的全部作品"><img loading="lazy" src="${rel}${MODEL_FACE[s.model]}" alt="${esc(s.model)}"></a>` : ''}
+  </div>
+  <a class="card-link title-link" href="${rel}set/${s.slug}/index.html"><h2 class="card-title">${esc(s.title)}</h2></a>
   <div class="card-meta">
     ${s.dupTag && s.dupTag !== s.model ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
     ${s.series ? `<a class="tag tag-series" href="${rel}series/${encodeURIComponent(s.series)}.html" title="查看该系列全部图集">${esc(s.series)}</a>` : ''}
@@ -762,15 +776,17 @@ function modelsIndexPage(byModel, allSets) {
   const bytes = allSets.reduce((n, s) => n + (s.bytes || 0), 0)
   const cards = entries.map(([name, list]) => {
     const pf = modelProfile(name)
-    const latest = list.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0]
+    // 封面：优先该模特最新一套**公开**图集；全是隐藏套图时用公开的模糊小图（否则会 404）
+    const latest = list.slice().sort((a, b) => cmpDateDesc(a, b))[0]
+    const face = list.filter(s => !s.hidden && s.coverFile).sort((a, b) => cmpDateDesc(a, b))[0] || latest
     const b = list.reduce((n, s) => n + (s.bytes || 0), 0)
     const chips = [pf.birth, pf.height, pf.style, pf.city].filter(Boolean).slice(0, 3)
       .map(v => `<span class="tag">${esc(v)}</span>`).join('')
     return `<article class="card">
     <a class="card-link" href="model/${encodeURIComponent(name)}.html">
       <div class="card-cover">
-        ${latest && latest.coverFile
-          ? `<img loading="lazy" src="set/${latest.slug}/${latest.coverThumb ? 'thumbs/' + latest.coverThumb + verQ(latest.thumbVer[latest.coverThumb]) : latest.coverFile}" alt="${esc(name)}">`
+        ${setCoverUrl(face)
+          ? `<img loading="lazy"${face.hidden ? ' class="blurred"' : ''} src="${setCoverUrl(face)}" alt="${esc(name)}">`
           : '<div class="no-cover">无封面</div>'}
         <span class="badge">${list.length} 套</span>
         ${b ? `<span class="badge badge-size">${esc(fmtSize(b))}</span>` : ''}
@@ -802,14 +818,15 @@ function modelsIndexPage(byModel, allSets) {
 function seriesIndexPage(bySeries, allSets) {
   const entries = Object.entries(bySeries).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], 'zh-CN'))
   const cards = entries.map(([name, list]) => {
-    const latest = list.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0]
+    const latest = list.slice().sort((a, b) => cmpDateDesc(a, b))[0]
+    const face = list.filter(s => !s.hidden && s.coverFile).sort((a, b) => cmpDateDesc(a, b))[0] || latest
     const b = list.reduce((n, s) => n + (s.bytes || 0), 0)
     const models = [...new Set(list.map(s => s.model).filter(Boolean))]
     return `<article class="card">
     <a class="card-link" href="series/${encodeURIComponent(name)}.html">
       <div class="card-cover">
-        ${latest && latest.coverFile
-          ? `<img loading="lazy" src="set/${latest.slug}/${latest.coverThumb ? 'thumbs/' + latest.coverThumb + verQ(latest.thumbVer[latest.coverThumb]) : latest.coverFile}" alt="${esc(name)}">`
+        ${setCoverUrl(face)
+          ? `<img loading="lazy"${face.hidden ? ' class="blurred"' : ''} src="${setCoverUrl(face)}" alt="${esc(name)}">`
           : '<div class="no-cover">无封面</div>'}
         <span class="badge">${list.length} 套</span>
         ${b ? `<span class="badge badge-size">${esc(fmtSize(b))}</span>` : ''}
@@ -1194,10 +1211,14 @@ img{max-width:100%;display:block}
   .hero-dots{left:14px;bottom:14px}
 }
 .badge-pin{left:8px;top:auto;bottom:8px;background:rgba(255,180,84,.92);color:#1a1206;font-weight:600}
-/* 封面上标出模特：同名作品（不同模特拍同一主题）一眼能分开 */
-.badge-model{left:auto;top:auto;right:8px;bottom:8px;background:rgba(10,12,18,.76);color:#fff;
-  border:1px solid rgba(255,255,255,.28);font-weight:600;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.card:hover .badge-model{border-color:var(--accent);color:var(--accent)}
+/* 封面右下角的模特头像：点它进模特页（同名作品的区分靠这张脸） */
+.card-avatar{position:absolute;right:8px;bottom:8px;z-index:3;width:36px;height:36px;border-radius:50%;
+  overflow:hidden;border:2px solid rgba(255,255,255,.85);background:var(--panel2);display:block;
+  box-shadow:0 2px 10px rgba(0,0,0,.45);transition:transform .15s,border-color .15s}
+.card-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.card-avatar:hover{transform:scale(1.08);border-color:var(--accent)}
+.cover-link{display:block;width:100%;height:100%;position:relative}
+.title-link{text-decoration:none;color:inherit;display:block}
 .pagination-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;margin:30px 0 10px}
 .pagination-wrap[hidden]{display:none}   /* CSS 的 display 会盖掉 hidden 属性，必须显式声明 */
 .pagination{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0;padding:0;justify-content:center}
@@ -1604,7 +1625,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       '<div class="card-cover locked">',
       (s.cover ? '<img class="blurred" loading="lazy" src="' + base + s.cover + '" alt="' + esc(s.title) + '">' : '<div class="no-cover">🔒</div>'),
       '<span class="badge badge-lock">🔒 隐藏</span>',
-      (s.model ? '<span class="badge badge-model" title="模特：' + esc(s.model) + '">👤 ' + esc(s.model) + '</span>' : ''),
+      (s.model && MODEL_FACE[s.model] ? '<a class="card-avatar" href="' + base + 'model/' + encodeURIComponent(s.model) + '.html" title="查看 ' + esc(s.model) + ' 的全部作品"><img loading="lazy" src="' + base + MODEL_FACE[s.model] + '" alt="' + esc(s.model) + '"></a>' : ''),
       '</div>',
       '<h2 class="card-title">' + esc(s.title) + '</h2>',
       '<div class="card-meta">',
@@ -1614,16 +1635,16 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       '</div></article>',
     ].join('') : [
       '<article class="card">',
-      '<a class="card-link" href="' + base + 'set/' + encodeURIComponent(s.slug) + '/index.html">',
       '<div class="card-cover">',
+      '<a class="card-link cover-link" href="' + base + 'set/' + encodeURIComponent(s.slug) + '/index.html" aria-label="' + esc(s.title) + '">',
       (s.cover ? '<img loading="lazy" src="' + base + s.cover + '" alt="' + esc(s.title) + '">' : '<div class="no-cover">无封面</div>'),
       '<span class="badge">' + s.imageCount + 'P</span>',
       (s.size || s.packSize ? '<span class="badge badge-size">' + esc(s.size || s.packSize) + '</span>' : ''),
       (s.pinned ? '<span class="badge badge-pin" title="置顶推荐">📌 置顶</span>' : ''),
-      (s.model ? '<span class="badge badge-model" title="模特：' + esc(s.model) + '">👤 ' + esc(s.model) + '</span>' : ''),
-      '</div>',
-      '<h2 class="card-title">' + esc(s.title) + '</h2>',
       '</a>',
+      (s.model && MODEL_FACE[s.model] ? '<a class="card-avatar" href="' + base + 'model/' + encodeURIComponent(s.model) + '.html" title="查看 ' + esc(s.model) + ' 的全部作品"><img loading="lazy" src="' + base + MODEL_FACE[s.model] + '" alt="' + esc(s.model) + '"></a>' : ''),
+      '</div>',
+      '<a class="card-link title-link" href="' + base + 'set/' + encodeURIComponent(s.slug) + '/index.html"><h2 class="card-title">' + esc(s.title) + '</h2></a>',
       '<div class="card-meta">',
       (s.dupTag && s.dupTag !== s.model ? '<span class="tag tag-model">' + esc(s.dupTag) + '</span>' : ''),
       (s.series ? '<a class="tag tag-series" href="' + base + 'series/' + encodeURIComponent(s.series) + '.html">' + esc(s.series) + '</a>' : ''),
@@ -2230,6 +2251,15 @@ function build() {
           : (x.model && x.series ? `${x.model}·${x.series}` : (x.model || x.series || x.slug))
     })
   })
+  // 卡片角标用的模特头像：自定义头像优先，否则用该模特最新一套公开图集的封面
+  const byModelAll = {}
+  sets.forEach(s => { if (s.model) (byModelAll[s.model] = byModelAll[s.model] || []).push(s) })
+  for (const [m, list] of Object.entries(byModelAll)) {
+    const av = avatarUrl(m, '')
+    if (av) { MODEL_FACE[m] = av.replace(/^\//, ''); continue }
+    const pub = list.filter(s => !s.hidden && s.coverFile).sort((a, b) => cmpDateDesc(a, b))[0]
+    if (pub) MODEL_FACE[m] = setCoverUrl(pub, '').replace(/^\//, '')
+  }
   // 置顶推荐（列表页顶部轮播）：按 pinOrder 升序，没填的排在后面并按日期
   const pinnedSets = sets.filter(s => s.pinned && !s.hidden)
     .sort((a, b) => (a.pinOrder || 9999) - (b.pinOrder || 9999) || cmpDateDesc(a, b))
