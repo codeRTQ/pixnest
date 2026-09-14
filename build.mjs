@@ -2060,6 +2060,9 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         const q = (document.getElementById('q')?.value || '').trim().toLowerCase();
         curPage = 1;
         renderList(q);
+        // 换排序＝换一种浏览顺序：回到第 1 页并直接跳到页面最上面
+        // （不做平滑滚动，跟重新进一次页面一样干脆）
+        window.scrollTo(0, 0);
       });
       if (false) (() => {
         const q = (document.getElementById('q')?.value || '').trim().toLowerCase();
