@@ -1190,6 +1190,16 @@ html[data-theme="light"] .pf-quote{background:linear-gradient(90deg,rgba(47,107,
 .legal p{margin:8px 0;color:var(--text)}
 .legal strong{color:var(--accent)}
 .notfound-actions{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0 40px}
+/* 手机端头部：品牌 + 图标一行，搜索框独占第二行（原来挤在一行会把页面撑出横向滚动条） */
+@media (max-width:700px){
+  .header-inner{flex-wrap:wrap;height:auto;gap:8px;padding:10px 0}
+  .brand{flex:0 0 auto}
+  .brand-text small{display:none}          /* 副标题太占位，手机上省略 */
+  .header-search{order:10;flex:1 0 100%;max-width:none;margin-left:0}
+  .header-search input{width:100%;height:40px}
+  .icon-btn{width:36px;height:36px;font-size:15px}
+  .site-header{position:sticky}
+}
 @media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.prevnext{grid-template-columns:1fr}.detail-title{font-size:18px}}`
 
 const PSWP_EXTRA = `/* PhotoSwipe 主题微调（暗色站风格） */
