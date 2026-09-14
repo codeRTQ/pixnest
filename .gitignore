@@ -34,3 +34,7 @@ Desktop.ini
 dist.new/
 dist.old/
 vision.json
+
+# 本地截图/临时产物
+_shots/
+
