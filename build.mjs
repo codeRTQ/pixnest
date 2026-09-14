@@ -2075,9 +2075,10 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
           const delta = (er.top - cr.top) - (cr.height / 2 - er.height / 2);
           listInner.scrollTo({ top: listInner.scrollTop + delta, behavior: 'smooth' });
         };
-        // 滚轮：只滚清单本身（不带动页面），每次一格匀速
+        // 滚轮：鼠标在置顶区里滚动时，只滚右边的置顶清单，不带动整个页面
+        // （挂在 heroBox 上而不是清单上：放在轮播大图上也一样，页面不会跟着往下滚）
         if (listInner) {
-          listInner.addEventListener('wheel', (e) => {
+          heroBox.addEventListener('wheel', (e) => {
             if (listInner.scrollHeight <= listInner.clientHeight + 2) return;   // 没得滚就交给页面
             e.preventDefault();
             listInner.scrollTop += e.deltaY;
