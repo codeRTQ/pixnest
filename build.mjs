@@ -560,10 +560,10 @@ function cardModelRow(s, rel = '', opts = {}) {
 /** 日期显示成 2026/09/13 这种斜杠格式（datetime 属性仍用标准 ISO 写法） */
 const slashDate = (d) => String(d || '').replace(/-/g, '/')
 
-/** 卡片上的检索/排序用数据（模特页的本地搜索、排序、"加载更多"都靠它）；
-    隐藏套图不暴露张数与体积，一律按 0 处理 */
+/** 卡片上的检索/排序用数据（模特页的标签筛选、排序、"下滑自动加载"都靠它）；
+    张数按真实值写：隐藏套图的张数/体积在 slug 里本来就是公开的（如 xx-28p-447mb），按 0 写反而让"热门"失效 */
 const cardData = (s) => ` data-slug="${esc(s.slug)}" data-date="${esc(s.date || '')}"`
-  + ` data-count="${s.hidden ? 0 : (s.imageCount || 0)}" data-bytes="${s.hidden ? 0 : (s.bytes || 0)}"`
+  + ` data-count="${s.imageCount || 0}" data-bytes="${s.bytes || 0}"`
   + ` data-tags=" ${esc(s.tags.join(' '))} "`
   + ` data-title="${esc(((s.displayTitle || s.title) + ' ' + (s.model || '') + ' ' + (s.series || '') + ' ' + s.tags.join(' ') + ' ' + (s.date || '')).toLowerCase())}"`
 
@@ -837,7 +837,6 @@ function modelPage(name, list, rel = '../') {
     </div>
   </header>
   <div class="filters" id="modelFilters">
-    <input id="mq" type="search" placeholder="在这 ${list.length} 套作品里搜标题 / 标签" aria-label="搜索该模特的作品">
     <span class="sort-chips" id="modelSort" role="group" aria-label="排序方式">
       <button type="button" class="on" data-sort="date-desc">最新</button>
       <button type="button" data-sort="count-desc">热门</button>
@@ -2212,7 +2211,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     }).catch((e) => { console.error('[列表页]', e); });
   }
 
-  // ── 模特页：本地搜索 / 排序 / 往下滚自动加载 ──
+  // ── 模特页：标签筛选 / 排序 / 往下滚自动加载 ──
   // 卡片在构建时已经全部渲染好，这里只做显隐与重排：
   // 首屏先摆 3 行，之后滚到接近底部就自动再放 3 行（不用点按钮）
   var mgrid = document.getElementById('modelGrid');
@@ -2221,7 +2220,6 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     var mempty = document.getElementById('modelEmpty');
     var mend = document.getElementById('modelEnd');
     var msentinel = document.getElementById('modelSentinel');
-    var mq = document.getElementById('mq');
     var msort = document.getElementById('modelSort');
     var M_ROWS = 3;                     // 每次加载 3 行
     var M_TOTAL = mcards.length;
@@ -2251,16 +2249,13 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     var mChips = document.getElementById('modelChips');
     var mStats = document.querySelector('.mt-stats');
     var mTag = '';                                   // '' = 全部（不按标签筛）
-    var mHit = function (c, q) {
-      if (q && attr(c, 'data-title').indexOf(q) < 0) return false;
-      if (mTag && attr(c, 'data-tags').indexOf(' ' + mTag + ' ') < 0) return false;
-      return true;
+    var mHit = function (c) {
+      return !mTag || attr(c, 'data-tags').indexOf(' ' + mTag + ' ') >= 0;
     };
     var mPaint = function () {
-      var q = (mq && mq.value || '').trim().toLowerCase();
       var hits = 0;
       mOrder().forEach(function (c) {
-        var hit = mHit(c, q);
+        var hit = mHit(c);
         if (hit) hits++;
         c.hidden = !(hit && hits <= mShown);
       });
@@ -2322,7 +2317,6 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       mShown = mBatch();
       mPaint();
     });
-    if (mq) mq.addEventListener('input', function () { mShown = mBatch(); mPaint(); });
     addEventListener('resize', function () { mFill(); }, { passive: true });
     mPaint();
   }
