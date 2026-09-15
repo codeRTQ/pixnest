@@ -451,9 +451,6 @@ function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
   const firstPage = sets.slice(0, per)
   const body = `
   <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}collections.html#${kind}">${label}</a><span>/</span><span class="cur">${esc(name)}</span></nav>
-  <div class="coll-search">
-    <input id="sq" type="search" placeholder="搜索：标题 / 模特" aria-label="在本${label}内搜索">
-  </div>
   <div class="page-head" hidden></div>
   <div class="filters" id="filters">
     <span class="sort-chips" id="sortChips" role="group" aria-label="排序方式">
@@ -461,6 +458,7 @@ function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
       <button type="button" data-sort="count-desc">热门</button>
       <button type="button" data-sort="date-hot">最近热门</button>
     </span>
+    <input id="sq" type="search" placeholder="搜索：标题 / 模特" aria-label="在本${label}内搜索">
   </div>
   <div class="grid" id="grid" data-scope="${kind}" data-scope-name="${esc(name)}">${firstPage.map((s, i) => card(s, rel, { eager: i < 8 })).join('')}</div>
   <p class="empty" id="empty" hidden>没有匹配的图集</p>
@@ -1278,12 +1276,11 @@ img{max-width:100%;display:block}
 .mavatar-md{width:64px;height:64px;border-width:2px}
 .mavatar-lg{width:96px;height:96px;border-width:2px}
 .page-head.model-head h1{display:flex;align-items:center;gap:12px}
-/* ── 标签页 / 系列页：抬头就是一个搜索框（只在本标签内搜索），不再摆标题和色块 ── */
-.coll-search{margin:14px 0 4px}
-.coll-search input{width:100%;height:40px;padding:0 15px;border-radius:12px;border:1px solid var(--line);
-  background:var(--panel);color:var(--fg);font:inherit;font-size:13.5px;outline:none}
-.coll-search input:focus{border-color:var(--accent)}
-.coll-search input::placeholder{color:var(--dim)}
+/* ── 标签页 / 系列页：搜索框跟排序按钮同一行（就在「最近热门」右边），不再单独占一行 ── */
+#sq{flex:0 1 260px;min-width:150px;height:32px;padding:0 13px;border-radius:10px;border:1px solid var(--line);
+  background:var(--panel);color:var(--fg);font:inherit;font-size:13px;outline:none;transition:.15s}
+#sq:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,140,255,.18)}
+#sq::placeholder{color:var(--dim)}
 /* ── 模特页抬头：圆头像 + 名字 + 一句话自我介绍 + 作品数 + 热门标签 ──
    整块做成一张"名片"：顶部一层淡蓝渐变往下淡出，卡片自身收边，和下面的筛选/瀑布流分开 */
 .model-top{display:flex;gap:18px;align-items:center;margin:14px 0 20px;padding:16px 18px;
@@ -1704,6 +1701,8 @@ html[data-theme="light"] .pn-input{background:rgba(255,255,255,.7);border-color:
   .mt-chips .cloud-chip span{padding:0 6px;font-size:11px}
   #modelFilters{position:static;padding:10px 0}
   #modelFilters input[type=search]{flex:1 0 100%;max-width:none}
+  /* 标签页：手机上排序按钮和搜索框各占一行更顺手 */
+  #sq{flex:1 1 100%;max-width:none}
 }
 @media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.prevnext{grid-template-columns:1fr}.detail-title{font-size:18px}}`
 
