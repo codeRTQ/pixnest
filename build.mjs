@@ -597,7 +597,7 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
     <span class="badge badge-lock">${LOCK_SVG}隐藏</span>
   </div>
   <h2 class="card-title">${esc(s.title)}</h2>
-  <div class="card-model">${cardModelRow(s, rel, opts)}</div>
+  ${opts.compact ? '' : `<div class="card-model">${cardModelRow(s, rel, opts)}</div>`}
   <div class="card-meta"><span class="lock-hint">还没设置隐藏密码</span></div>
 </article>`
   // 隐藏但有密码：不加任何"锁定"专属样式 —— 唯一的区别是封面模糊 + 左上角一个「隐藏」按钮，
@@ -609,7 +609,7 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
     <button class="badge badge-lock unlock-btn" title="${esc(HIDDEN_HINT)}" aria-label="${esc(s.title)}（隐藏，点这里输密码）">${LOCK_SVG}隐藏</button>
   </div>
   <h2 class="card-title">${esc(s.title)}</h2>
-  <div class="card-model">${cardModelRow(s, rel, opts)}</div>
+  ${opts.compact ? '' : `<div class="card-model">${cardModelRow(s, rel, opts)}</div>`}
   <div class="card-meta">${cardMetaRow(s, rel)}
   </div>
 </article>`
@@ -624,7 +624,7 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
     </div>
   </a>
   <a class="card-link title-link" href="${rel}set/${s.slug}/index.html"><h2 class="card-title">${esc(s.title)}</h2></a>
-  <div class="card-model">${cardModelRow(s, rel, opts)}</div>
+  ${opts.compact ? '' : `<div class="card-model">${cardModelRow(s, rel, opts)}</div>`}
   <div class="card-meta">${cardMetaRow(s, rel)}
   </div>
 </article>`
@@ -846,7 +846,6 @@ function modelPage(name, list, rel = '../') {
     <div class="mt-main">
       <h1>${esc(name)}</h1>
       ${profileIntroHtml(pf)}
-      <p class="mt-stats">共 <b>${list.length}</b> 套作品</p>
       ${tagList.length ? `<div class="mt-chips" id="modelChips" role="group" aria-label="按标签筛选这位模特的作品">
         <button type="button" class="cloud-chip on" data-tag="">全部<span>${list.length}</span></button>
         ${tagList.map(([t, n]) => `<button type="button" class="cloud-chip cloud-tag" data-tag="${esc(t)}">#${esc(t)}<span>${n}</span></button>`).join('')}
@@ -861,7 +860,7 @@ function modelPage(name, list, rel = '../') {
     </span>
     <input id="mq" type="search" placeholder="搜索：标签 / 标题" aria-label="在这位模特的作品里搜索">
   </div>
-  <div class="grid" id="modelGrid">${list.map((s, i) => card(s, rel, { noModel: true, eager: i < 8 })).join('')}</div>
+  <div class="grid grid-model" id="modelGrid">${list.map((s, i) => card(s, rel, { noModel: true, compact: true, eager: i < 8 })).join('')}</div>
   <p class="empty" id="modelEmpty" hidden>没有匹配的作品，换个词试试</p>
   <div class="grid-sentinel" id="modelSentinel" aria-hidden="true"></div>
   <p class="grid-end" id="modelEnd" hidden>已全部加载 · 共 ${list.length} 套</p>`
@@ -1203,6 +1202,15 @@ img{max-width:100%;display:block}
 .page-head h1{margin:0;font-size:22px}
 .page-head .sub{color:var(--dim);margin:4px 0 0;font-size:13px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px}   /* 桌面一行 5 张 */
+/* 模特页的作品网格：小方卡（一行约 8 张），只有封面 + 标题 + 标签，不放头像和日期行 */
+.grid-model{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px}
+.grid-model .card-cover{aspect-ratio:1/1}
+.grid-model .card-title{padding:8px 8px 4px;font-size:12.5px;line-height:1.4;-webkit-line-clamp:2}
+.grid-model .card-meta{padding:0 8px 8px;gap:4px;font-size:10.5px}
+.grid-model .card-meta .tag{font-size:10.5px;padding:1px 6px}
+.grid-model .badge{font-size:10px;padding:1px 6px}
+.grid-model .badge-lock{padding:2px 7px;font-size:10.5px}
+.grid-model .ic-lock{width:9px;height:9px}
 /* 卡片：选中/悬停不出现彩色描边，改成"图片轻微放大 + 轻微抬起投影" */
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
   transition:transform .2s ease,box-shadow .2s ease}
@@ -1703,7 +1711,12 @@ html[data-theme="light"] .pn-input{background:rgba(255,255,255,.7);border-color:
   #modelFilters input[type=search]{flex:1 0 100%;max-width:none}
   /* 标签页：手机上排序按钮和搜索框各占一行更顺手 */
   #sq{flex:1 1 100%;max-width:none}}
-@media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.prevnext{grid-template-columns:1fr}.detail-title{font-size:18px}}`
+@media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+  /* 模特页：手机上作品卡再小一点，一行 3 张 */
+  .grid.grid-model{grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:10px}
+  .grid-model .card-title{font-size:12px;padding:7px 7px 3px}
+  .grid-model .card-meta{padding:0 7px 7px}
+  .prevnext{grid-template-columns:1fr}.detail-title{font-size:18px}}`
 
 const PSWP_EXTRA = `/* PhotoSwipe 主题微调（暗色站风格） */
 .pswp{--pswp-bg:rgba(8,10,14,.97)}
@@ -2438,7 +2451,6 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
       return arr;
     };
     var mChips = document.getElementById('modelChips');
-    var mStats = document.querySelector('.mt-stats');
     var mqInput = document.getElementById('mq');       // 本页搜索框（只在这位模特的作品里搜）
     var mTag = '';                                   // '' = 全部（不按标签筛）
     var mHit = function (c) {
@@ -2456,11 +2468,6 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
         c.hidden = !(hit && hits <= mShown);
       });
       mHits = hits;
-      if (mStats) {
-        mStats.innerHTML = hits === M_TOTAL
-          ? '共 <b>' + M_TOTAL + '</b> 套作品'
-          : '筛出 <b>' + hits + '</b> 套 · 共 ' + M_TOTAL + ' 套';
-      }
       if (mempty) mempty.hidden = hits !== 0;
       if (mend) {
         mend.hidden = !(hits > 0 && hits <= mShown);
