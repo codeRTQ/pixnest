@@ -1198,9 +1198,12 @@ img{max-width:100%;display:block}
 .page-head{margin:28px 0 18px}
 .page-head h1{margin:0;font-size:22px}
 .page-head .sub{color:var(--dim);margin:4px 0 0;font-size:13px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px}   /* 桌面一行 5 张 */
-/* 全部模特页：小方卡（一行约 8 张），只有方形封面 + 名字 + 标签 */
-.grid-sm{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px}
+/* 卡片网格：桌面一行 6 个（配合每页 18 套 = 3 行一页）；平板 3 个、手机 2 个
+   用固定列数而不是 auto-fill —— auto-fill 在 1140px 只能给到 5 列，想 6 列就得牺牲平板的整行 */
+.grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px}
+@media(max-width:1000px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+/* 全部模特页：小方卡（一行 8 个），只有方形封面 + 名字 + 标签 */
+.grid-sm{grid-template-columns:repeat(8,minmax(0,1fr));gap:12px}
 .grid-sm .card-cover{aspect-ratio:1/1}
 .grid-sm .card-title{padding:8px 8px 4px;font-size:12.5px;line-height:1.4;-webkit-line-clamp:2}
 .grid-sm .card-meta{padding:0 8px 8px;gap:4px;font-size:10.5px}
@@ -1707,9 +1710,9 @@ html[data-theme="light"] .pn-input{background:rgba(255,255,255,.7);border-color:
   #modelFilters input[type=search]{flex:1 0 100%;max-width:none}
   /* 标签页：手机上排序按钮和搜索框各占一行更顺手 */
   #sq{flex:1 1 100%;max-width:none}}
-@media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+@media(max-width:640px){.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
   /* 全部模特页：手机上一行 3 个 */
-  .grid.grid-sm{grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:10px}
+  .grid.grid-sm{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
   .grid-sm .card-title{font-size:12px;padding:7px 7px 3px}
   .grid-sm .card-meta{padding:0 7px 7px}
   .prevnext{grid-template-columns:1fr}.detail-title{font-size:18px}}`
@@ -2268,7 +2271,7 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
       const renderList = (q) => {
         const all = applySort(INDEX.sets.filter(s => inScope(s) && hits(s, q)));
         // 客户端分页：沿用同一套 Bootstrap 分页类名，搜索结果多时不再一屏铺完
-        const PER = 20;   // 与 setsPerPage 一致：20 能被 5（桌面）/2（手机）整除，每页都是整行
+        const PER = 18;   // 与 site.json 的 setsPerPage 一致：桌面一行 6 个 = 3 行一页
         const pages = Math.max(1, Math.ceil(all.length / PER));
         if (curPage > pages) curPage = 1;
         const list = all.slice((curPage - 1) * PER, curPage * PER);
