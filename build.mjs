@@ -2060,19 +2060,28 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
     randBtn.addEventListener('click', () => {
       fetch(base + 'search-index.json').then(r => r.ok ? r.json() : null).then(d => {
         if (!d) { toast('读取索引失败，刷新后再试', false); return; }
-        // 隐藏套图只有在"本机已解锁"时才参与随机（页面上那张卡带 unlocked 类）
-        const pool = d.sets.filter(s => !s.locked || document.querySelector('[data-hid="' + s.slug + '"].unlocked'));
-        const s = pool[Math.floor(Math.random() * pool.length)];
-        if (!s) return;
-        if (!s.locked) { location.href = base + 'set/' + encodeURIComponent(s.slug) + '/index.html'; return; }
-        // 隐藏套图的真实地址是 h/<token>/，拼 set/<slug>/ 会 404 ——
-        // 优先用解锁时写在卡片上的 data-url，卡片不在本页就用记住的密码现算
-        const card = document.querySelector('[data-hid="' + s.slug + '"].unlocked');
-        const u = card && card.getAttribute('data-url');
-        if (u) { location.href = u; return; }
+        // 全站图集一起参与，隐藏套图按真实比例出现（不再只挑"本页卡片已解锁"的那几套：
+        // 那样池子里其实只剩首页那几张卡对应的图集，其它隐藏套图永远抽不到）
+        const rest = d.sets.slice();
         const pw = HN.pw();
-        if (!pw) return;
-        sha16(pw + '|' + s.slug).then(tok => { location.href = (base || HN.rel) + 'h/' + tok + '/'; }).catch(() => {});
+        let tries = 0;
+        const pick = () => {
+          if (!rest.length || tries++ > 10) { toast('没找到能跳转的图集，稍后再试', false); return; }
+          const s = rest.splice(Math.floor(Math.random() * rest.length), 1)[0];
+          if (!s) { pick(); return; }
+          if (!s.locked) { location.href = base + 'set/' + encodeURIComponent(s.slug) + '/index.html'; return; }
+          // 隐藏套图：先看本页那份已解锁的卡片、再拿记住的密码现算 h/<token>/，
+          // 都拿不到就换一套（例如这套用的是单独密码）
+          const card = document.querySelector('[data-hid="' + s.slug + '"].unlocked');
+          const u = card && card.getAttribute('data-url');
+          if (u) { location.href = u; return; }
+          if (!pw) { pick(); return; }
+          sha16(pw + '|' + s.slug).then(tok => {
+            const url = (base || HN.rel) + 'h/' + tok + '/';
+            probe(url).then(ok => { if (ok) location.href = url; else pick(); });
+          }).catch(() => pick());
+        };
+        pick();
       }).catch(() => { toast('读取索引失败，刷新后再试', false); });
     });
   }

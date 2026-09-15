@@ -1130,8 +1130,16 @@ table.lk tr.bad td{color:#ff8a8a}
 .tagtable td{padding:6px 8px;border-bottom:1px solid var(--line)}
 .tagtable input[type=text]{padding:5px 8px;font-size:12px}
 .tagtable .mini{font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer;margin-left:4px}
+.tagtable tr.flash td{animation:tagflash 1.8s ease}
+@keyframes tagflash{0%{background:rgba(91,140,255,.28)}60%{background:rgba(91,140,255,.16)}100%{background:transparent}}
 /* 「用于」列：标签对应的图集（点标题进编辑页） */
 .tagtable td.used{max-width:520px}
+/* 前台标签页入口：做成小按钮，别用小灰字（看不清） */
+.tagprev{margin-top:6px}
+.tagprev a{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;
+  border:1px solid rgba(91,140,255,.5);background:rgba(91,140,255,.14);color:var(--accent);
+  font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
+.tagprev a:hover{background:rgba(91,140,255,.24);border-color:var(--accent);color:var(--fg)}
 .tset{display:inline-block;margin:2px 6px 2px 0;padding:2px 8px;border-radius:999px;border:1px solid var(--line);
   background:var(--panel);color:var(--fg);text-decoration:none;font-size:12px;white-space:nowrap}
 .tset:hover{border-color:var(--accent);color:var(--accent)}
@@ -1586,7 +1594,36 @@ def page(title, body, extra_js=''):
     return f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
 <style>{CSS}</style></head><body><div class="wrap">{body}</div>
-<script>{JS}{extra_js}</script></body></html>"""
+<script>{JS}{SCROLL_KEEP}{extra_js}</script></body></html>"""
+
+
+# 每个后台页面在"提交后跳转/刷新"时记住滚动位置，回来后自动回到原处
+# （典型场景：标签管理里删掉/重命名某个标签后重建并回到 /tags，不用再从头滚到底下找）
+SCROLL_KEEP = """
+// ── 刷新/跳转后回到原来的滚动位置（按页面路径分别记）──
+(function(){
+  try{
+    var key='adm-scroll:'+location.pathname;
+    var save=function(){try{sessionStorage.setItem(key,String(Math.round(window.scrollY)))}catch(e){}};
+    var y=sessionStorage.getItem(key);
+    if(y!==null){
+      var yy=parseInt(y,10)||0;
+      var jump=function(){window.scrollTo(0,yy)};
+      jump();
+      // 图片/表格渲染完会改变高度，再补几次，确保真的落到位
+      requestAnimationFrame(jump);
+      setTimeout(jump,120);setTimeout(jump,380);
+    }
+    window.addEventListener('beforeunload',save);
+    document.addEventListener('submit',save,true);
+    // 页面内主动跳转（post() 里用的是 location.href）之前也先存一次
+    document.addEventListener('click',function(e){
+      var a=e.target&&e.target.closest?e.target.closest('a[href]'):null;
+      if(a&&a.target!=='_blank')save();
+    },true);
+  }catch(e){}
+})();
+"""
 
 
 def filter_sort_sets(sets, q='', sort='date-desc'):
@@ -2837,9 +2874,9 @@ def tags_page(msg=''):
 
     rows = sorted(tags.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     table = ''.join(
-        f'<tr><td><span class="chip" style="padding:4px 10px">{esc_attr(t)}</span>'
-        f'<div class="dim" style="font-size:12px;margin-top:4px">'
-        f'<a href="http://127.0.0.1:8090/tag/{quote(t)}.html" target="_blank">看站点里的标签页 ↗</a></div></td>'
+        f'<tr data-tag="{esc_attr(t)}"><td><span class="chip" style="padding:4px 10px">{esc_attr(t)}</span>'
+        f'<div class="tagprev"><a href="http://127.0.0.1:8090/tag/{quote(t)}.html" target="_blank" '
+        f'title="在站点里打开这个标签页">前台标签页 ↗</a></div></td>'
         f'<td>{len(sl)}</td>'
         f'<td class="used">{used_cell(sl)}</td>'
         f'<td><input type="text" class="rename" data-from="{t}" placeholder="改成…" style="max-width:140px">'
@@ -2882,6 +2919,7 @@ function renameTag(btn){
   toast('正在重命名并重建站点，请稍候…');
   post('/tagmerge',{from:[from],to},'/tags');
 }
+// 删除标签后会重建并回到本页：记住"下一行是谁"，回来后停在原处并高亮，不用再从头滚下来
 function delTag(btn){
   const t=btn.dataset.tag;
   if(btn.dataset.armed!=='1'){
@@ -2890,6 +2928,12 @@ function delTag(btn){
     setTimeout(()=>{if(btn.dataset.armed==='1'){btn.dataset.armed='0';btn.textContent='全站删除'}},5000);
     return;
   }
+  try{
+    const tr=btn.closest('tr'),rows=[...document.querySelectorAll('#tagTable tbody tr')],i=rows.indexOf(tr);
+    const after=rows.slice(i+1).find(r=>!r.hidden)||rows.slice(0,i).reverse().find(r=>!r.hidden);
+    sessionStorage.setItem('tag-focus',after?(after.dataset.tag||''):'');
+    sessionStorage.setItem('tag-filter',(document.getElementById('tagFilter')||{}).value||'');
+  }catch(e){}
   toast('正在删除并重建站点…');post('/tagmerge',{from:[t],to:''},'/tags');
 }
 function mergeGroup(btn){
@@ -2910,7 +2954,31 @@ function mergeGroup(btn){
   post('/tagmerge',{from,to},'/tags');
 }
 const tf=document.getElementById('tagFilter');
-if(tf)tf.addEventListener('input',()=>{const q=tf.value.trim().toLowerCase();let n=0;document.querySelectorAll('#tagTable tbody tr').forEach(tr=>{const hit=!q||tr.textContent.toLowerCase().includes(q);tr.hidden=!hit;if(hit)n++})});
+function applyTagFilter(){
+  const q=tf?tf.value.trim().toLowerCase():'';
+  document.querySelectorAll('#tagTable tbody tr').forEach(tr=>{
+    const hit=!q||tr.textContent.toLowerCase().includes(q);tr.hidden=!hit;
+  });
+}
+if(tf){
+  // 筛选词也记住（删完标签回来时列表和位置都能对上）
+  try{const saved=sessionStorage.getItem('tag-filter');if(saved){tf.value=saved}}catch(e){}
+  tf.addEventListener('input',()=>{applyTagFilter();try{sessionStorage.setItem('tag-filter',tf.value)}catch(e){}});
+  applyTagFilter();
+}
+// 删完标签回到本页：滚回原来那一行并闪一下
+(function(){
+  let want=null;
+  try{want=sessionStorage.getItem('tag-focus');sessionStorage.removeItem('tag-focus')}catch(e){}
+  if(!want)return;
+  const tr=document.querySelector('#tagTable tbody tr[data-tag="'+want.replace(/"/g,'\\\\"')+'"]');
+  if(!tr)return;
+  setTimeout(()=>{
+    tr.scrollIntoView({block:'center'});
+    tr.classList.add('flash');
+    setTimeout(()=>tr.classList.remove('flash'),1800);
+  },750);
+})();
 """
     if msg:
         extra += f'window.addEventListener("load",()=>toast({json.dumps(msg, ensure_ascii=False)},true));'
