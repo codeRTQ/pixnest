@@ -450,7 +450,7 @@ function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
   const per = config.setsPerPage || 20
   const firstPage = sets.slice(0, per)
   const body = `
-  <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}collections.html#${kind}">${label}</a><span>/</span><span class="cur">${esc(name)}</span></nav>
+  <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}collections.html#${kind === 'tag' ? 'tags' : 'series'}">${label}</a><span>/</span><span class="cur">${esc(name)}</span></nav>
   <div class="page-head" hidden></div>
   <div class="filters" id="filters">
     <span class="sort-chips" id="sortChips" role="group" aria-label="排序方式">
@@ -3029,7 +3029,7 @@ function build() {
       <div class="chips-cloud">${Object.entries(byModel).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="model/${encodeURIComponent(n)}.html">👤 ${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">暂无</span>'}</div>
       <h2 class="sec-title" id="series">系列</h2>
       <div class="chips-cloud">${Object.entries(bySeries).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="series/${encodeURIComponent(n)}.html">${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">还没有系列：在后台编辑图集时填「系列」字段（比如某个模特的第几期），这里就会自动出现系列页</span>'}</div>
-      <h2 class="sec-title" id="tags">标签</h2>
+      <h2 class="sec-title" id="tags"><span id="tag"></span><span id="tagcloud"></span>标签</h2>
       <div class="chips-cloud">${Object.entries(byTag).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="tag/${encodeURIComponent(n)}.html">#${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">暂无</span>'}</div>`,
     canonical: pageUrl('collections.html'),
   }))
@@ -3080,7 +3080,7 @@ function build() {
     body: `<div class="page-head"><h1>404 · 页面不存在</h1><p class="sub">链接可能已失效，或这套图集已下架</p></div>
     <p class="notfound-actions">
       <a class="btn btn-primary" href="/index.html">返回首页</a>
-      <a class="btn ghost" href="/collections.html">浏览系列与标签</a>
+      <a class="btn ghost" href="/collections">浏览系列与标签</a>
     </p>`,
   }))
 
