@@ -452,7 +452,7 @@ function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
   const body = `
   <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}collections.html#${kind}">${label}</a><span>/</span><span class="cur">${esc(name)}</span></nav>
   <div class="coll-search">
-    <input id="sq" type="search" placeholder="在「${esc(name)}」里搜索：标题 / 模特 / 标签" aria-label="在本${label}内搜索">
+    <input id="sq" type="search" placeholder="搜索：标题 / 模特" aria-label="在本${label}内搜索">
   </div>
   <div class="page-head" hidden></div>
   <div class="filters" id="filters">
@@ -2095,8 +2095,6 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
       : s.series === SCOPE.name);
     // 范围内没有静态分页（page/N.html），所以永远用客户端分页
     const clearHref = SCOPE ? location.pathname : base + 'index.html';
-    // 标签页上用页面里那个搜索框，顶栏那个全局搜索就收起来，避免两个输入框打架
-    if (SCOPE) { const hs = document.querySelector('.header-search'); if (hs) hs.hidden = true; }
     let INDEX = null;
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     // 模特行：头像 + 模特名 + 日期（与静态卡片保持一致）
@@ -2183,7 +2181,12 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
       if (input) {
         let t = null;
         const urlBase = SCOPE ? location.pathname : base + 'index.html';
+        // 标签页/系列页上，顶栏那个全局搜索框也照常能用：两边内容互相同步，
+        // 于是都只在本标签内筛（两个框不会各搜各的）
+        const headerQ = document.getElementById('q');
+        const syncHeader = SCOPE && headerQ && headerQ !== input;
         input.addEventListener('input', () => {
+          if (syncHeader) headerQ.value = input.value;
           clearTimeout(t);
           t = setTimeout(() => {
             const q = input.value.trim().toLowerCase();
@@ -2193,6 +2196,13 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
             history.replaceState(null, '', url);
           }, 180);
         });
+        if (syncHeader) {
+          headerQ.addEventListener('input', () => {
+            input.value = headerQ.value;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+          });
+          if (q0) headerQ.value = q0;
+        }
       }
       // 排序：只留三个按钮 —— 最新（按日期）/ 热门（按张数，内容多）/ 最近热门（日期为主，同一天里张数多的在前）
       const sortChips = document.getElementById('sortChips');
