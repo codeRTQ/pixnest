@@ -1130,6 +1130,15 @@ table.lk tr.bad td{color:#ff8a8a}
 .tagtable td{padding:6px 8px;border-bottom:1px solid var(--line)}
 .tagtable input[type=text]{padding:5px 8px;font-size:12px}
 .tagtable .mini{font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer;margin-left:4px}
+/* 「用于」列：标签对应的图集（点标题进编辑页） */
+.tagtable td.used{max-width:520px}
+.tset{display:inline-block;margin:2px 6px 2px 0;padding:2px 8px;border-radius:999px;border:1px solid var(--line);
+  background:var(--panel);color:var(--fg);text-decoration:none;font-size:12px;white-space:nowrap}
+.tset:hover{border-color:var(--accent);color:var(--accent)}
+.tset .tmodel{color:var(--dim);margin-left:5px;font-size:11px}
+.tsets{display:inline-block;margin-top:4px;font-size:12px;color:var(--dim)}
+.tsets summary{cursor:pointer;color:var(--accent)}
+.tset-list{margin-top:6px;max-height:240px;overflow:auto;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
 .taggroup{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 0;border-bottom:1px dashed var(--line)}
 .taggroup:last-child{border-bottom:none}
 .tg-list{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -2804,12 +2813,35 @@ def tag_similar_groups():
 
 
 def tags_page(msg=''):
+    from urllib.parse import quote
     tags = all_tags()
     groups = tag_similar_groups()
+    # slug → (标题, 模特)：标签列表里要能看出「这个标签用在哪些图集」
+    info = {}
+    for s in list_sets():
+        m = s['meta']
+        info[s['slug']] = (str(m.get('title') or s['slug']), str(m.get('model') or ''))
+
+    def used_cell(sl):
+        """该标签用到的图集：默认列前 3 套，点开看全部（点标题直接去编辑）"""
+        items = []
+        for slug in sl:
+            title, model = info.get(slug, (slug, ''))
+            items.append('<a class="tset" href="/edit?slug=' + quote(slug) + '" title="' + esc_attr(slug) + '">'
+                         + esc_attr(title) + (f'<span class="tmodel">{esc_attr(model)}</span>' if model else '') + '</a>')
+        if len(items) <= 3:
+            return ''.join(items)
+        return (''.join(items[:3])
+                + '<details class="tsets"><summary>展开全部 ' + str(len(sl)) + ' 套</summary>'
+                + '<div class="tset-list">' + ''.join(items) + '</div></details>')
+
     rows = sorted(tags.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     table = ''.join(
-        f'<tr><td><span class="chip" style="padding:4px 10px">{esc_attr(t)}</span></td><td>{len(sl)}</td>'
-        f'<td class="dim" style="font-size:12px">{"、".join(sl[:3])}{"…" if len(sl) > 3 else ""}</td>'
+        f'<tr><td><span class="chip" style="padding:4px 10px">{esc_attr(t)}</span>'
+        f'<div class="dim" style="font-size:12px;margin-top:4px">'
+        f'<a href="http://127.0.0.1:8090/tag/{quote(t)}.html" target="_blank">看站点里的标签页 ↗</a></div></td>'
+        f'<td>{len(sl)}</td>'
+        f'<td class="used">{used_cell(sl)}</td>'
         f'<td><input type="text" class="rename" data-from="{t}" placeholder="改成…" style="max-width:140px">'
         f'<button class="mini" onclick="renameTag(this)">重命名</button>'
         f'<button class="mini" onclick="delTag(this)" data-tag="{esc_attr(t)}">全站删除</button></td></tr>'
@@ -2825,7 +2857,8 @@ def tags_page(msg=''):
     body = f"""
 <div class="crumb"><a href="/">← 图集列表</a></div>
 <h1>标签管理</h1>
-<p class="sub">共 {len(tags)} 个标签 · 检测到 {len(groups)} 组语义相近标签（合并后旧标签从全站图集移除并替换为新标签）</p>
+<p class="sub">共 {len(tags)} 个标签 · 检测到 {len(groups)} 组语义相近标签（合并后旧标签从全站图集移除并替换为新标签）<br>
+  「用于」一列列出了每个标签用在哪几套图集上，点标题直接进编辑页；超过 3 套点「展开全部」。</p>
 
 <div class="panel"><h2>🔀 语义相近标签（建议合并）</h2>
   {ghtml or '<p class="sub">没有检测到需要合并的相近标签 👍</p>'}

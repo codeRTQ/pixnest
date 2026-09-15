@@ -450,7 +450,7 @@ function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
   const per = config.setsPerPage || 20
   const firstPage = sets.slice(0, per)
   const body = `
-  <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}collections.html#${kind === 'tag' ? 'tags' : 'series'}">${label}</a><span>/</span><span class="cur">${esc(name)}</span></nav>
+  <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><span class="cur">${label}</span><span>/</span><span class="cur">${esc(name)}</span></nav>
   <div class="page-head" hidden></div>
   <div class="filters" id="filters">
     <span class="sort-chips" id="sortChips" role="group" aria-label="排序方式">
@@ -519,7 +519,6 @@ ${ADULT_GATE}
     <button class="icon-btn" id="themeBtn" title="切换深浅色">🌗</button>
     ${hiddenCountGlobal ? `<button class="icon-btn" id="lockBtn" title="输入密码查看隐藏图集">🔒</button>` : ''}
     <a class="icon-btn" href="${rel}models.html" title="模特列表">👤</a>
-    <a class="icon-btn" href="${rel}collections.html" title="系列与标签">☰</a>
   </div>
   ${nav}
 </header>
@@ -529,7 +528,6 @@ ${ADULT_GATE}
     <p>${esc(config.siteName)} · 静态生成 · <span id="set-total">${SITE_BITS || ''}</span></p>
     <p class="foot-links">
       <a href="${rel}models.html">模特</a>
-      <a href="${rel}collections.html">系列与标签</a>
       <a href="${rel}about.html">免责声明</a>
       ${config.privacy ? `<a href="${rel}privacy.html">隐私政策</a>` : ''}
       <a href="${rel}feed.xml">RSS</a>
@@ -917,7 +915,7 @@ function modelsIndexPage(byModel, allSets) {
     <p class="sub">共 ${entries.length} 位模特 · ${allSets.length} 套图集 · ${allSets.reduce((n, s) => n + (s.imageCount || 0), 0)} 张${bytes ? ` · 合计 <b class="size-strong">${esc(fmtSize(bytes))}</b>` : ''}</p>
   </div>
   <div class="grid">${cards}</div>
-  <p class="more-hint"><a href="collections.html" class="dim">按系列与标签浏览 →</a></p>`
+  <p class="more-hint"><a href="index.html" class="dim">看全部图集 →</a></p>`
   return layout({
     title: `模特列表 - ${config.siteName}`,
     desc: `${config.siteName} 收录的全部模特，共 ${entries.length} 位、${allSets.length} 套图集。`,
@@ -956,7 +954,7 @@ function seriesIndexPage(bySeries, allSets) {
     <p class="sub">共 ${entries.length} 个系列 · ${entries.reduce((n, [, l]) => n + l.length, 0)} 套图集</p>
   </div>
   <div class="grid">${cards}</div>
-  <p class="more-hint"><a href="models.html" class="dim">按模特浏览 →</a> · <a href="collections.html" class="dim">全部标签 →</a></p>`
+  <p class="more-hint"><a href="models.html" class="dim">按模特浏览 →</a></p>`
   return layout({
     title: `系列列表 - ${config.siteName}`,
     desc: `${config.siteName} 的全部系列，共 ${entries.length} 个。`,
@@ -1095,7 +1093,6 @@ function detailPage(s, prev, next, canonical = '', related = [], tagCounts = {},
       <h3 class="side-title">🏷 热门标签</h3>
       <div class="side-tags">${hotTags.map(([t, l]) =>
         `<a class="side-tag" href="${rel}tag/${encodeURIComponent(t)}.html">${esc(t)}<span>${l.length}</span></a>`).join('')}</div>
-      <p class="side-note"><a href="${rel}collections.html#tags">查看全部标签 →</a></p>
     </section>` : ''}
   </aside>`
 
@@ -2238,7 +2235,6 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
           + '<div class="empty-actions">'
           + '<button class="btn btn-primary sm" id="emptyClear">清除搜索，看全部 ' + INDEX.count + ' 套</button>'
           + topModels.map(([m, n]) => '<a class="btn ghost sm" href="' + base + 'model/' + encodeURIComponent(m) + '.html">👤 ' + esc(m) + '（' + n + ' 套）</a>').join('')
-          + '<a class="btn ghost sm" href="' + base + 'collections.html">🏷 全部标签与系列</a>'
           + '</div>'
           + '<p class="empty-sub">热门标签（点一下直接搜）</p>'
           + '<div class="chips-cloud" id="emptyTags">'
@@ -3019,20 +3015,8 @@ function build() {
   // 系列列表页：只在真的有系列时生成（否则是个空页面，反而困惑）
   if (Object.keys(bySeries).length) writeFileSync(join(DIST, 'series.html'), seriesIndexPage(bySeries, sets))
 
-  // 系列/标签索引页
-  writeFileSync(join(DIST, 'collections.html'), layout({
-    title: `全部系列与标签 - ${config.siteName}`,
-    desc: `${config.siteName} 的系列与标签索引`,
-    rel: '',
-    body: `<div class="page-head"><h1>系列与标签</h1><p class="sub">共 ${Object.keys(bySeries).length} 个系列 · ${Object.keys(byTag).length} 个标签 · ${Object.keys(byModel).length} 位模特</p></div>
-      <h2 class="sec-title" id="models">模特</h2>
-      <div class="chips-cloud">${Object.entries(byModel).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="model/${encodeURIComponent(n)}.html">👤 ${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">暂无</span>'}</div>
-      <h2 class="sec-title" id="series">系列</h2>
-      <div class="chips-cloud">${Object.entries(bySeries).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="series/${encodeURIComponent(n)}.html">${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">还没有系列：在后台编辑图集时填「系列」字段（比如某个模特的第几期），这里就会自动出现系列页</span>'}</div>
-      <h2 class="sec-title" id="tags"><span id="tag"></span><span id="tagcloud"></span>标签</h2>
-      <div class="chips-cloud">${Object.entries(byTag).sort((a, b) => b[1].length - a[1].length).map(([n, l]) => `<a class="cloud-chip" href="tag/${encodeURIComponent(n)}.html">#${esc(n)}<span>${l.length}</span></a>`).join('') || '<span class="dim">暂无</span>'}</div>`,
-    canonical: pageUrl('collections.html'),
-  }))
+  // （原来的「系列与标签」索引页 collections.html 已按需求下线：
+  //   标签浏览走每张卡片上的标签芯片 / 详情页侧栏「热门标签」/ 顶栏搜索，标签页本身仍然照常生成）
 
   // ── 合规页：免责声明 / DMCA + 隐私政策 ──
   const contact = config.dmca
@@ -3080,7 +3064,7 @@ function build() {
     body: `<div class="page-head"><h1>404 · 页面不存在</h1><p class="sub">链接可能已失效，或这套图集已下架</p></div>
     <p class="notfound-actions">
       <a class="btn btn-primary" href="/index.html">返回首页</a>
-      <a class="btn ghost" href="/collections">浏览系列与标签</a>
+      <a class="btn ghost" href="/models.html">按模特浏览</a>
     </p>`,
   }))
 
@@ -3145,7 +3129,7 @@ function build() {
     { loc: pageUrl('index.html'), lastmod: sets[0]?.date || '', pri: '1.0' },
     ...(Object.keys(byModel).length ? [{ loc: pageUrl('models.html'), lastmod: sets[0]?.date || '', pri: '0.8' }] : []),
     ...(Object.keys(bySeries).length ? [{ loc: pageUrl('series.html'), lastmod: sets[0]?.date || '', pri: '0.6' }] : []),
-    { loc: pageUrl('collections.html'), lastmod: sets[0]?.date || '', pri: '0.6' },
+    { loc: pageUrl('models.html'), lastmod: sets[0]?.date || '', pri: '0.7' },
     { loc: pageUrl('about.html'), lastmod: '', pri: '0.3' },
     ...(config.privacy ? [{ loc: pageUrl('privacy.html'), lastmod: '', pri: '0.3' }] : []),
     ...Object.entries(byModel).map(([n, l]) => ({ loc: pageUrl(`model/${encodeURIComponent(n)}.html`), lastmod: l.map(s => s.date || '').sort().pop() || '', pri: '0.7' })),
