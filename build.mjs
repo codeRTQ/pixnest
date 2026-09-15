@@ -564,6 +564,7 @@ const slashDate = (d) => String(d || '').replace(/-/g, '/')
     隐藏套图不暴露张数与体积，一律按 0 处理 */
 const cardData = (s) => ` data-slug="${esc(s.slug)}" data-date="${esc(s.date || '')}"`
   + ` data-count="${s.hidden ? 0 : (s.imageCount || 0)}" data-bytes="${s.hidden ? 0 : (s.bytes || 0)}"`
+  + ` data-tags=" ${esc(s.tags.join(' '))} "`
   + ` data-title="${esc(((s.displayTitle || s.title) + ' ' + (s.model || '') + ' ' + (s.series || '') + ' ' + s.tags.join(' ') + ' ' + (s.date || '')).toLowerCase())}"`
 
 const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
@@ -815,11 +816,12 @@ function modelPage(name, list, rel = '../') {
   const imgs = list.reduce((n, s) => n + (s.imageCount || 0), 0)
   const bytes = list.reduce((n, s) => n + (s.bytes || 0), 0)
   const seriesList = [...new Set(list.map(s => s.series).filter(Boolean))]
-  // 热门标签：出现次数最多的 6 个（点进去是对应标签页），其余走「全部标签」入口
+  // 标签筛选芯片：第一个「全部」= 不筛，后面 5 个是该模特最热门的标签
+  // （只筛这位模特自己的作品，点标签不会跳到别人的标签页）
   const tagCount = {}
   list.forEach(s => s.tags.forEach(t => { tagCount[t] = (tagCount[t] || 0) + 1 }))
   const allTags = Object.entries(tagCount).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
-  const tagList = allTags.slice(0, 6)
+  const tagList = allTags.slice(0, 5)
   const body = `
   <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}models.html">模特</a><span>/</span><span class="cur">${esc(name)}</span></nav>
   <header class="model-top">
@@ -828,9 +830,9 @@ function modelPage(name, list, rel = '../') {
       <h1>${esc(name)}</h1>
       ${profileIntroHtml(pf)}
       <p class="mt-stats">共 <b>${list.length}</b> 套作品</p>
-      ${(seriesList.length || tagList.length) ? `<div class="mt-chips">
-        ${seriesList.map(n => `<a class="cloud-chip" href="${rel}series/${encodeURIComponent(n)}.html">${esc(n)}<span>${list.filter(s => s.series === n).length}</span></a>`).join('')}
-        ${tagList.map(([t, n]) => `<a class="cloud-chip cloud-tag" href="${rel}tag/${encodeURIComponent(t)}.html">#${esc(t)}<span>${n}</span></a>`).join('')}
+      ${tagList.length ? `<div class="mt-chips" id="modelChips" role="group" aria-label="按标签筛选这位模特的作品">
+        <button type="button" class="cloud-chip on" data-tag="">全部<span>${list.length}</span></button>
+        ${tagList.map(([t, n]) => `<button type="button" class="cloud-chip cloud-tag" data-tag="${esc(t)}">#${esc(t)}<span>${n}</span></button>`).join('')}
       </div>` : ''}
     </div>
   </header>
@@ -1269,8 +1271,13 @@ img{max-width:100%;display:block}
 .mt-social a{color:var(--accent);text-decoration:none}
 .mt-social a:hover{text-decoration:underline}
 .mt-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
-.mt-chips .cloud-chip{padding:4px 11px;font-size:12.5px;border-radius:999px}
-.mt-chips .cloud-chip span{padding:0 7px;font-size:11.5px}
+.mt-chips .cloud-chip{padding:4px 11px;font-size:12.5px;border-radius:999px;font:inherit;font-size:12.5px;
+  cursor:pointer;transition:.15s;background:var(--panel);border:1px solid var(--line);color:var(--dim);display:inline-flex;align-items:center;gap:7px}
+.mt-chips .cloud-chip:hover{color:var(--fg);border-color:var(--accent)}
+.mt-chips .cloud-chip.on{background:rgba(91,140,255,.16);border-color:rgba(91,140,255,.5);color:var(--accent);font-weight:600}
+.mt-chips .cloud-chip span{padding:0 7px;font-size:11.5px;color:var(--dim);
+  background:var(--panel2);border-radius:999px}
+.mt-chips .cloud-chip.on span{color:var(--accent);background:rgba(91,140,255,.14)}
 .cloud-tag{color:var(--dim)}
 .cloud-tag:hover{color:var(--accent);border-color:var(--accent)}
 /* 模特页筛选行：搜索框 + 三个排序按钮（和列表页同一套紧凑样式） */
@@ -2241,15 +2248,28 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       arr.forEach(function (c) { mgrid.appendChild(c); });
       return arr;
     };
+    var mChips = document.getElementById('modelChips');
+    var mStats = document.querySelector('.mt-stats');
+    var mTag = '';                                   // '' = 全部（不按标签筛）
+    var mHit = function (c, q) {
+      if (q && attr(c, 'data-title').indexOf(q) < 0) return false;
+      if (mTag && attr(c, 'data-tags').indexOf(' ' + mTag + ' ') < 0) return false;
+      return true;
+    };
     var mPaint = function () {
       var q = (mq && mq.value || '').trim().toLowerCase();
       var hits = 0;
       mOrder().forEach(function (c) {
-        var hit = !q || attr(c, 'data-title').indexOf(q) >= 0;
+        var hit = mHit(c, q);
         if (hit) hits++;
         c.hidden = !(hit && hits <= mShown);
       });
       mHits = hits;
+      if (mStats) {
+        mStats.innerHTML = hits === M_TOTAL
+          ? '共 <b>' + M_TOTAL + '</b> 套作品'
+          : '筛出 <b>' + hits + '</b> 套 · 共 ' + M_TOTAL + ' 套';
+      }
       if (mempty) mempty.hidden = hits !== 0;
       if (mend) {
         mend.hidden = !(hits > 0 && hits <= mShown);
@@ -2286,6 +2306,14 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         if (msentinel.getBoundingClientRect().top < innerHeight + 500) mLoadMore();
       }, { passive: true });
     }
+    if (mChips) mChips.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-tag]');
+      if (!b) return;
+      mTag = b.getAttribute('data-tag') || '';       // 空串 = 全部
+      mChips.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      mShown = mBatch();
+      mPaint();
+    });
     if (msort) msort.addEventListener('click', function (e) {
       var btn = e.target.closest('button[data-sort]');
       if (!btn) return;
