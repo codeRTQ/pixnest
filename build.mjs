@@ -861,6 +861,7 @@ function modelPage(name, list, rel = '../') {
       <button type="button" data-sort="count-desc">热门</button>
       <button type="button" data-sort="date-hot">最近热门</button>
     </span>
+    <input id="mq" type="search" placeholder="搜索：标签 / 标题" aria-label="在这位模特的作品里搜索">
   </div>
   <div class="grid" id="modelGrid">${list.map((s, i) => card(s, rel, { noModel: true, eager: i < 8 })).join('')}</div>
   <p class="empty" id="modelEmpty" hidden>没有匹配的作品，换个词试试</p>
@@ -1276,11 +1277,11 @@ img{max-width:100%;display:block}
 .mavatar-md{width:64px;height:64px;border-width:2px}
 .mavatar-lg{width:96px;height:96px;border-width:2px}
 .page-head.model-head h1{display:flex;align-items:center;gap:12px}
-/* ── 标签页 / 系列页：搜索框跟排序按钮同一行（就在「最近热门」右边），不再单独占一行 ── */
-#sq{flex:0 1 260px;min-width:150px;height:32px;padding:0 13px;border-radius:10px;border:1px solid var(--line);
+/* ── 标签页 / 系列页 / 模特页：搜索框跟排序按钮同一行（就在「最近热门」右边），不单独占一行 ── */
+#sq,#mq{flex:0 1 260px;min-width:150px;height:32px;padding:0 13px;border-radius:10px;border:1px solid var(--line);
   background:var(--panel);color:var(--fg);font:inherit;font-size:13px;outline:none;transition:.15s}
-#sq:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,140,255,.18)}
-#sq::placeholder{color:var(--dim)}
+#sq:focus,#mq:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,140,255,.18)}
+#sq::placeholder,#mq::placeholder{color:var(--dim)}
 /* ── 模特页抬头：圆头像 + 名字 + 一句话自我介绍 + 作品数 + 热门标签 ──
    整块做成一张"名片"：顶部一层淡蓝渐变往下淡出，卡片自身收边，和下面的筛选/瀑布流分开 */
 .model-top{display:flex;gap:18px;align-items:center;margin:14px 0 20px;padding:16px 18px;
@@ -1702,8 +1703,7 @@ html[data-theme="light"] .pn-input{background:rgba(255,255,255,.7);border-color:
   #modelFilters{position:static;padding:10px 0}
   #modelFilters input[type=search]{flex:1 0 100%;max-width:none}
   /* 标签页：手机上排序按钮和搜索框各占一行更顺手 */
-  #sq{flex:1 1 100%;max-width:none}
-}
+  #sq{flex:1 1 100%;max-width:none}}
 @media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.prevnext{grid-template-columns:1fr}.detail-title{font-size:18px}}`
 
 const PSWP_EXTRA = `/* PhotoSwipe 主题微调（暗色站风格） */
@@ -2428,9 +2428,14 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
     };
     var mChips = document.getElementById('modelChips');
     var mStats = document.querySelector('.mt-stats');
+    var mqInput = document.getElementById('mq');       // 本页搜索框（只在这位模特的作品里搜）
     var mTag = '';                                   // '' = 全部（不按标签筛）
     var mHit = function (c) {
-      return !mTag || attr(c, 'data-tags').indexOf(' ' + mTag + ' ') >= 0;
+      if (mTag && attr(c, 'data-tags').indexOf(' ' + mTag + ' ') < 0) return false;
+      var q = (mqInput && mqInput.value || '').trim().toLowerCase();
+      // data-title 里含标题 / 模特 / 系列 / 标签 / 日期，所以「标签 / 标题」都能搜到
+      if (q && attr(c, 'data-title').indexOf(q) < 0) return false;
+      return true;
     };
     var mPaint = function () {
       var hits = 0;
@@ -2497,6 +2502,22 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
       mShown = mBatch();
       mPaint();
     });
+    if (mqInput) {
+      var mt = null;
+      mqInput.addEventListener('input', function () {
+        clearTimeout(mt);
+        mt = setTimeout(function () { mShown = mBatch(); mPaint(); }, 160);
+      });
+      // 顶栏搜索框也照常能用：内容同步到本页搜索框，同样只在这位模特的作品里搜
+      var mHeaderQ = document.getElementById('q');
+      if (mHeaderQ) {
+        mqInput.addEventListener('input', function () { mHeaderQ.value = mqInput.value; });
+        mHeaderQ.addEventListener('input', function () {
+          mqInput.value = mHeaderQ.value;
+          mqInput.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+      }
+    }
     addEventListener('resize', function () { mFill(); }, { passive: true });
     mPaint();
   }
