@@ -662,14 +662,14 @@ function heroHtml(pinned, rel = '') {
   const slides = pinned.map((s, i) => {
     const p = pic(s)
     const img = p ? `<img class="${p.locked ? 'blurred' : p.banner ? 'is-banner' : ''}" src="${s.hidden ? blurUrl(s.slug, rel) : `${rel}set/${s.slug}/${p.f}${verQ(p.v)}`}" alt="${esc(s.title)}"${i ? ' loading="lazy"' : ''}>` : ''
+    // 轮播里只留标题 + 一行信息：角标和「输入密码查看」按钮都去掉了，画面更干净
+    // （隐藏图集点一下大图就能输密码，见 APP 里的点击处理）
     const info = `
       <span class="hero-info">
-        <span class="hero-badge">${s.hidden ? '🔒 置顶 · 隐藏' : '📌 置顶推荐'}</span>
         <h2>${esc(s.title)}</h2>
         <span class="hero-meta">${s.hidden
           ? `${[s.model].filter(Boolean).map(esc).join(' · ')}${s.model ? ' · ' : ''}隐藏图集，输入密码后查看`
           : [s.model, `${s.imageCount} 张`, s.sizeText].filter(Boolean).map(esc).join(' · ')}</span>
-        ${s.hidden ? `<button class="unlock-btn hero-unlock">🔓 输入密码查看</button>` : ''}
       </span>`
     return s.hidden
       ? `
@@ -718,13 +718,10 @@ function listPage(sets, page, totalPages, rel = '', total = sets.length, allSets
   <div class="page-head" hidden></div>
   <div class="filters" id="filters">
     <span class="sort-chips" id="sortChips" role="group" aria-label="排序方式">
-      <button type="button" class="on" data-sort="date-desc">最新发布</button>
-      <button type="button" data-sort="date-asc">最早发布</button>
-      <button type="button" data-sort="count-desc">图片最多</button>
-      <button type="button" data-sort="size-desc">体积最大</button>
-      <button type="button" data-sort="title-asc">标题排序</button>
+      <button type="button" class="on" data-sort="date-desc">最新</button>
+      <button type="button" data-sort="count-desc">热门</button>
+      <button type="button" data-sort="date-hot">最近热门</button>
     </span>
-    <span class="filter-chips" id="filterChips"></span>
   </div>
   <div class="grid" id="grid">${sets.map((s, i) => card(s, rel, { eager: i < 8 })).join('')}</div>
   <p class="empty" id="empty" hidden>没有匹配的图集</p>
@@ -1215,17 +1212,16 @@ img{max-width:100%;display:block}
 .filters{position:sticky;top:var(--header-h,65px);z-index:15;background:var(--bg);
   display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 6px;padding:12px 0}
 .filters select{padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;cursor:pointer}
-/* 排序标签：与"快捷筛选"同一行的 chip 组，中间用竖线隔开 */
-.sort-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.sort-chips button{font:inherit;font-size:12px;padding:5px 12px;border-radius:999px;border:1px solid var(--line);
-  background:var(--panel);color:var(--dim);cursor:pointer;transition:.15s}
-.sort-chips button:hover{color:var(--fg);border-color:var(--accent)}
-.sort-chips button.on{background:rgba(91,140,255,.18);border-color:var(--accent);color:var(--fg);font-weight:600}
-.sort-chips + .filter-chips:not(:empty){padding-left:12px;border-left:1px solid var(--line)}
-.filter-chips{display:flex;gap:6px;flex-wrap:wrap}
-.filter-chips button{font:inherit;font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--dim);cursor:pointer}
-.filter-chips button:hover{color:var(--fg);border-color:var(--accent)}
-.filter-chips button.on{background:rgba(91,140,255,.18);border-color:var(--accent);color:var(--fg)}
+/* 排序按钮：紧凑款（参考 youzirou：32px 高、10px 圆角、13px/500、左右 14px）
+   选中＝淡色底 + 描边 + 亮字；未选中＝纯灰字、无边框无底色 */
+.sort-chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sort-chips button{font:inherit;font-size:13px;font-weight:500;height:32px;padding:0 14px;border-radius:10px;
+  display:inline-flex;align-items:center;border:1px solid transparent;background:transparent;color:var(--dim);
+  cursor:pointer;transition:background .15s,color .15s,border-color .15s;white-space:nowrap}
+.sort-chips button:hover{background:var(--panel);color:var(--fg)}
+.sort-chips button.on{background:rgba(91,140,255,.16);border-color:rgba(91,140,255,.5);color:var(--accent);font-weight:600}
+/* 列表页筛选行现在只有三个排序按钮，旧的「系列快捷筛选」芯片不再使用 */
+.filter-chips{display:none}
 /* 回到顶部 */
 .to-top{position:fixed;right:22px;bottom:26px;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);
   background:var(--panel);color:var(--fg);font-size:18px;cursor:pointer;z-index:30;box-shadow:0 8px 24px rgba(0,0,0,.4)}
@@ -1245,12 +1241,9 @@ img{max-width:100%;display:block}
 .hero-track{position:relative;aspect-ratio:${config.heroRatio || '21/9'};max-height:${config.heroMaxHeight || 380}px;min-height:150px}
 .hero-slide{position:absolute;inset:0;display:block;opacity:0;transition:opacity .55s ease;text-decoration:none;color:#fff;pointer-events:none}
 .hero-slide.on{opacity:1;pointer-events:auto}
-/* 隐藏图集置顶：轮播里只给模糊封面 + 🔒，点按钮输密码 */
-.hero-slide.locked{cursor:default}
-.hero-slide.locked .hero-info{gap:10px}
-.hero-unlock{align-self:flex-start;font:inherit;font-size:13px;padding:7px 16px;border-radius:999px;cursor:pointer;
-  border:1px solid rgba(255,180,84,.55);background:rgba(255,180,84,.92);color:#1a1206;font-weight:600}
-.hero-unlock:hover{filter:brightness(1.08)}
+/* 隐藏图集置顶：轮播里只给模糊封面，角标和按钮都去掉了，点大图直接输密码 */
+.hero-slide.locked{cursor:pointer}
+.hero-slide.locked .hero-info{gap:6px}
 .hero-item.is-hidden{cursor:default}
 .hero-item.is-hidden img{filter:blur(2px) saturate(.85);transform:scale(1.06)}
 .hero-item.is-hidden.unlocked{cursor:pointer}
@@ -1264,8 +1257,6 @@ img{max-width:100%;display:block}
 .hero-slide:hover img{filter:brightness(1.06)}
 /* 文字块：宽松排版（去掉 CTA 后只留 角标 / 标题 / 信息 三行） */
 .hero-info{position:absolute;left:22px;right:22px;bottom:20px;z-index:2;display:flex;flex-direction:column;gap:9px;align-items:flex-start}
-.hero-badge{align-self:flex-start;background:rgba(255,180,84,.92);color:#1a1206;font-size:12px;font-weight:600;
-  padding:3px 11px;border-radius:999px;letter-spacing:.02em}
 .hero-info h2{margin:0;font-size:19px;line-height:1.45;letter-spacing:.01em;text-shadow:0 2px 12px rgba(0,0,0,.55)}
 .hero-meta{color:rgba(255,255,255,.88);font-size:12.5px;line-height:1.6;letter-spacing:.02em;text-shadow:0 1px 8px rgba(0,0,0,.5)}
 .hero-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:32px;height:32px;border-radius:50%;
@@ -1545,6 +1536,14 @@ html[data-theme="light"] .pf-quote{background:linear-gradient(90deg,rgba(47,107,
   .header-search input{width:100%;height:40px}
   .icon-btn{width:36px;height:36px;font-size:15px}
   .site-header{position:sticky}
+  /* 手机：头部本来就高，吸顶的排序行再紧凑一点，别把内容顶下去 */
+  .filters{padding:8px 0}
+  .sort-chips{gap:6px}
+  .sort-chips button{height:30px;padding:0 12px;font-size:12.5px;border-radius:9px}
+  /* 轮播文字块：去掉角标/按钮后留白收紧一点，标题在窄屏也不至于压到画面中间 */
+  .hero-info{gap:5px}
+  .hero-info h2{font-size:16.5px}
+  .hero-meta{font-size:12px}
 }
 @media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.prevnext{grid-template-columns:1fr}.detail-title{font-size:18px}}`
 
@@ -1664,7 +1663,6 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       }
     }
     keepText(el, 'data-badge', el.querySelector('.badge-lock'));
-    keepText(el, 'data-herobadge', el.querySelector('.hero-badge'));
     keepText(el, 'data-meta', el.querySelector('.hero-meta'));
     keepText(el, 'data-b', el.querySelector('.hero-item-text b'));
     keepText(el, 'data-sub', el.querySelector('.hero-item-text span'));
@@ -1672,7 +1670,6 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     setText(el, '.badge-lock', '🔓 已解锁');
     setText(el, '.lock-hint', '已解锁');
     setText(el, '.unlock-btn', '🔓 查看这套图');
-    setText(el, '.hero-badge', '📌 置顶推荐');
     setText(el, '.hero-meta', '已解锁，点开就能看');
     var b = el.querySelector('.hero-item-text b');
     if (b) b.textContent = b.textContent.replace(/^🔒\\s*/, '');
@@ -1702,7 +1699,6 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       el.removeAttribute(key);
     };
     restore('data-badge', '.badge-lock');
-    restore('data-herobadge', '.hero-badge');
     restore('data-meta', '.hero-meta');
     restore('data-b', '.hero-item-text b');
     restore('data-sub', '.hero-item-text span');
@@ -1794,7 +1790,13 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     var card = e.target.closest('[data-hid].unlocked');
     if (card && !e.target.closest('a[href]')) {
       var u = card.getAttribute('data-url');
-      if (u) location.href = u;
+      if (u) { location.href = u; return; }
+    }
+    // 置顶轮播里隐藏图集的按钮已经去掉：点大图/缩略条本身就是"输密码"
+    var heroLocked = e.target.closest('.hero [data-hid]:not(.unlocked)');
+    if (heroLocked && !e.target.closest('a[href]')) {
+      var slug = heroLocked.getAttribute('data-hid');
+      if (slug) { e.preventDefault(); askHidden(slug); }
     }
   });
   var lockBtn = document.getElementById('lockBtn');
@@ -1927,23 +1929,23 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
           }, 180);
         });
       }
-      // 排序 + 快捷筛选（系列/模特）+ 回到顶部
+      // 排序：只留三个按钮 —— 最新（按日期）/ 热门（按张数，内容多）/ 最近热门（日期为主，同一天里张数多的在前）
       const sortChips = document.getElementById('sortChips');
-      const SORT_LABEL = { 'date-desc': '最新发布', 'date-asc': '最早发布', 'count-desc': '图片最多', 'size-desc': '体积最大', 'title-asc': '标题排序' };
+      const SORT_LABEL = { 'date-desc': '最新', 'count-desc': '热门', 'date-hot': '最近热门' };
       let SORT = 'date-desc';
-      const chips = document.getElementById('filterChips');
       const applySort = (list) => {
         const v = SORT;
         const arr = list.slice();
-        if (v === 'date-desc') arr.sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))
+        const byDateDesc = (a, b) => String(b.date || '').localeCompare(String(a.date || ''))
           || String(b.addedAt || '').localeCompare(String(a.addedAt || ''))
-          || String(b.slug || '').localeCompare(String(a.slug || '')));
-        else if (v === 'date-asc') arr.sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))
-          || String(a.addedAt || '').localeCompare(String(b.addedAt || ''))
-          || String(a.slug || '').localeCompare(String(b.slug || '')));
-        else if (v === 'count-desc') arr.sort((a, b) => (b.imageCount || 0) - (a.imageCount || 0));
-        else if (v === 'size-desc') arr.sort((a, b) => (b.bytes || 0) - (a.bytes || 0));
-        else if (v === 'title-asc') arr.sort((a, b) => (a.title || '').localeCompare(b.title || '', 'zh-CN'));
+          || String(b.slug || '').localeCompare(String(a.slug || ''));
+        if (v === 'date-desc') arr.sort(byDateDesc);
+        else if (v === 'count-desc') arr.sort((a, b) => (b.imageCount || 0) - (a.imageCount || 0) || byDateDesc(a, b));
+        // 最近热门：先按日期，同一天里再按张数（byDateDesc 会一路比到 slug，所以张数必须夹在中间比）
+        else if (v === 'date-hot') arr.sort((a, b) =>
+          String(b.date || '').localeCompare(String(a.date || ''))
+          || (b.imageCount || 0) - (a.imageCount || 0)
+          || byDateDesc(a, b));
         return arr;
       };
       // 搜不到结果时的引导：清除搜索 + 模特入口 + 热门标签（原来只有一行裸文字）
@@ -2033,25 +2035,6 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
           }
         }
       };
-      // 快捷筛选芯片：热门系列 + 模特
-      if (chips) {
-        const seriesCount = {}, modelCount = {};
-        INDEX.sets.forEach(s => {
-          if (s.series) seriesCount[s.series] = (seriesCount[s.series] || 0) + 1;
-          if (s.model) modelCount[s.model] = (modelCount[s.model] || 0) + 1;
-        });
-        const top = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 6);
-        const mk = (label, val) => '<button data-q="' + esc(val) + '">' + esc(label) + '</button>';
-        chips.innerHTML = top(seriesCount).map(([k, n]) => mk(k + ' ' + n, k)).join('');
-        chips.querySelectorAll('button[data-q]').forEach(b => b.addEventListener('click', () => {
-          const q = b.dataset.q;
-          chips.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
-          if (input) input.value = q;
-          curPage = 1;
-          renderList(q.toLowerCase());
-          history.replaceState(null, '', base + 'index.html?q=' + encodeURIComponent(q));
-        }));
-      }
       if (sortChips) sortChips.addEventListener('click', (e) => {
         const btn = e.target.closest('button[data-sort]');
         if (!btn) return;
