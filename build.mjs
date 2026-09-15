@@ -547,7 +547,6 @@ ${ADULT_GATE}
     <h3 id="pnTitle">🔒 输入隐藏图集密码</h3>
     <p class="pn-sub" id="pnSub">这套图已隐藏，输入密码后查看</p>
     <input class="pn-input" id="pnInput" type="password" autocomplete="current-password" placeholder="密码" aria-label="隐藏图集密码">
-    <div class="pn-past" id="pnPast" hidden></div>
     <p class="pn-err" id="pnErr"></p>
     <div class="pn-actions">
       <button type="button" class="pn-btn" id="pnCancel">取消</button>
@@ -1621,24 +1620,19 @@ html[data-theme="light"] .pf-quote{background:linear-gradient(90deg,rgba(47,107,
 .pn-mask{position:absolute;inset:0;background:rgba(8,10,14,.42);
   -webkit-backdrop-filter:blur(10px) saturate(120%);backdrop-filter:blur(10px) saturate(120%)}
 .pn-card{position:relative;width:100%;max-width:382px;border-radius:18px;padding:22px 22px 18px;
-  background:rgba(23,26,33,.72);border:1px solid rgba(255,255,255,.14);
-  -webkit-backdrop-filter:blur(22px) saturate(150%);backdrop-filter:blur(22px) saturate(150%);
-  box-shadow:0 30px 70px -30px rgba(0,0,0,.85),inset 0 1px 0 rgba(255,255,255,.06);
+  background:rgba(20,23,30,.42);border:1px solid rgba(255,255,255,.16);
+  -webkit-backdrop-filter:blur(28px) saturate(170%);backdrop-filter:blur(28px) saturate(170%);
+  box-shadow:0 30px 70px -30px rgba(0,0,0,.85),inset 0 1px 0 rgba(255,255,255,.08);
   animation:pnIn .18s ease}
-html[data-theme="light"] .pn-card{background:rgba(255,255,255,.8);border-color:rgba(0,0,0,.08);
-  box-shadow:0 24px 60px -28px rgba(20,30,60,.45)}
+html[data-theme="light"] .pn-card{background:rgba(255,255,255,.52);border-color:rgba(0,0,0,.08);
+  box-shadow:0 24px 60px -28px rgba(20,30,60,.35)}
 @keyframes pnIn{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
 .pn-card h3{margin:0 0 6px;font-size:16px;letter-spacing:.01em}
 .pn-sub{margin:0 0 14px;font-size:12.5px;color:var(--dim);line-height:1.65}
-.pn-input{width:100%;height:42px;padding:0 14px;border-radius:11px;border:1px solid var(--line);
-  background:rgba(0,0,0,.22);color:var(--fg);font:inherit;font-size:14px;outline:none;transition:.15s}
-html[data-theme="light"] .pn-input{background:rgba(0,0,0,.04)}
-.pn-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,140,255,.2)}
-.pn-past{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0}
-.pn-past-label{font-size:11.5px;color:var(--dim)}
-.pn-past-btn{font:inherit;font-size:12px;padding:3px 10px;border-radius:999px;cursor:pointer;
-  border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--dim)}
-.pn-past-btn:hover{color:var(--accent);border-color:var(--accent)}
+.pn-input{width:100%;height:42px;padding:0 14px;border-radius:11px;border:1px solid rgba(255,255,255,.18);
+  background:rgba(0,0,0,.3);color:var(--fg);font:inherit;font-size:14px;outline:none;transition:.15s}
+html[data-theme="light"] .pn-input{background:rgba(255,255,255,.7);border-color:rgba(0,0,0,.1)}
+.pn-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,140,255,.25)}
 .pn-err{margin:10px 0 0;font-size:12.5px;color:#ff9090;min-height:17px}
 .pn-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
 .pn-btn{font:inherit;font-size:13.5px;height:36px;padding:0 18px;border-radius:10px;cursor:pointer;
@@ -1926,39 +1920,18 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     box: document.getElementById('pnModal'),
     input: document.getElementById('pnInput'),
     sub: document.getElementById('pnSub'),
-    past: document.getElementById('pnPast'),
     err: document.getElementById('pnErr'),
     ok: document.getElementById('pnOk'),
     slug: '',
   };
   var pmErr = function (msg) { if (PM.err) PM.err.textContent = msg || ''; };
-  var pmPast = function () {
-    if (!PM.past) return;
-    PM.past.innerHTML = '';
-    var hist = HN.list();
-    if (!hist.length) { PM.past.hidden = true; return; }
-    // 用 DOM 拼，别用字符串拼 HTML（这里的 esc() 在外层作用域，取不到）
-    var lab = document.createElement('span');
-    lab.className = 'pn-past-label';
-    lab.textContent = '用过的密码';
-    PM.past.appendChild(lab);
-    hist.forEach(function (p) {
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'pn-past-btn';
-      b.setAttribute('data-pw', p);
-      b.textContent = p;
-      PM.past.appendChild(b);
-    });
-    PM.past.hidden = false;
-  };
   var pmOpen = function (slug) {
     if (!PM.box) return false;
     PM.slug = slug;
     if (PM.sub) PM.sub.textContent = HN.hint;
+    // 上次用过的密码直接回填到输入框（仍是 password 类型，显示为圆点）
     if (PM.input) { PM.input.value = HN.pw() || HN.list()[0] || ''; PM.input.removeAttribute('readonly'); }
     pmErr('');
-    pmPast();
     PM.box.hidden = false;
     document.documentElement.style.overflow = 'hidden';
     setTimeout(function () { try { PM.input.focus(); PM.input.select(); } catch (e) {} }, 30);
@@ -2003,12 +1976,6 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     if (pmCancel) pmCancel.addEventListener('click', function () { pmClose(); toast('已取消', false); });
     var pmMask = PM.box.querySelector('[data-pn-close]');
     if (pmMask) pmMask.addEventListener('click', function () { pmClose(); });
-    if (PM.past) PM.past.addEventListener('click', function (e) {
-      var b = e.target.closest('.pn-past-btn');
-      if (!b) return;
-      if (PM.input) { PM.input.value = b.getAttribute('data-pw') || ''; PM.input.focus(); }
-      pmErr('');
-    });
     if (PM.input) PM.input.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { e.preventDefault(); pmSubmit(); }
     });
@@ -2039,6 +2006,13 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     if (card && !e.target.closest('a[href]')) {
       var u = card.getAttribute('data-url');
       if (u) { location.href = u; return; }
+    }
+    // 锁定状态下，点封面图（不只是左上角那个小按钮）也弹密码框
+    var lockedArt = e.target.closest('.card-locked:not(.unlocked) .card-cover');
+    if (lockedArt) {
+      var artCard = lockedArt.closest('[data-hid]');
+      var artSlug = artCard && artCard.getAttribute('data-hid');
+      if (artSlug) { e.preventDefault(); e.stopPropagation(); askHidden(artSlug); return; }
     }
     // 置顶轮播里隐藏图集的按钮已经去掉：点大图/缩略条本身就是"输密码"
     var heroLocked = e.target.closest('.hero [data-hid]:not(.unlocked)');
