@@ -860,7 +860,7 @@ function modelPage(name, list, rel = '../') {
     </span>
     <input id="mq" type="search" placeholder="搜索：标签 / 标题" aria-label="在这位模特的作品里搜索">
   </div>
-  <div class="grid grid-model" id="modelGrid">${list.map((s, i) => card(s, rel, { noModel: true, compact: true, eager: i < 8 })).join('')}</div>
+  <div class="grid" id="modelGrid" data-unit="套">${list.map((s, i) => card(s, rel, { noModel: true, eager: i < 8 })).join('')}</div>
   <p class="empty" id="modelEmpty" hidden>没有匹配的作品，换个词试试</p>
   <div class="grid-sentinel" id="modelSentinel" aria-hidden="true"></div>
   <p class="grid-end" id="modelEnd" hidden>已全部加载 · 共 ${list.length} 套</p>`
@@ -887,24 +887,19 @@ function modelsIndexPage(byModel, allSets) {
     // 没裁过头像才退回"最新一套公开图集"的封面；全隐藏且没头像时用公开的模糊小图（否则会 404）
     const latest = list.slice().sort((a, b) => cmpDateDesc(a, b))[0]
     const face = list.filter(s => !s.hidden && s.coverFile).sort((a, b) => cmpDateDesc(a, b))[0] || latest
-    const b = list.reduce((n, s) => n + (s.bytes || 0), 0)
     const avatar = avatarUrl(name)
     const facePic = avatar || setCoverUrl(face)
     const faceLqip = (avatar || face.hidden) ? '' : face.coverLqip
-    const chips = [pf.birth, pf.height, pf.style, pf.city].filter(Boolean).slice(0, 3)
+    // 模特卡不放「N 套」角标、也不放头像/最新日期行 —— 封面本身就是头像，只留标签
+    const chips = [pf.birth, pf.height, pf.style, pf.city, pf.sign].filter(Boolean).slice(0, 4)
       .map(v => `<span class="tag">${esc(v)}</span>`).join('')
     return `<article class="card">
     <a class="card-link cover-link" href="model/${encodeURIComponent(name)}.html" aria-label="${esc(name)}">
       <div class="card-cover"${faceLqip ? ` style="background-image:url(${faceLqip})"` : ''}>
         ${facePic ? `<img loading="lazy" src="${facePic}" alt="${esc(name)}">` : '<div class="no-cover">无封面</div>'}
-        <span class="badge">${list.length} 套</span>
       </div>
     </a>
     <a class="card-link title-link" href="model/${encodeURIComponent(name)}.html"><h2 class="card-title">${esc(name)}</h2></a>
-    <div class="card-model">
-      ${MODEL_FACE[name] ? `<a class="card-avatar" href="model/${encodeURIComponent(name)}.html" aria-label="${esc(name)}"><img loading="lazy" src="${MODEL_FACE[name]}" alt="${esc(name)}"></a>` : ''}
-      <time datetime="${esc(latest ? latest.date : '')}">最新 ${esc(slashDate(latest ? latest.date : ''))}</time>
-    </div>
     <div class="card-meta">
       <span class="card-chips">${chips}</span>
     </div>
@@ -913,10 +908,12 @@ function modelsIndexPage(byModel, allSets) {
   const body = `
   <div class="page-head">
     <h1>模特</h1>
-    <p class="sub">共 ${entries.length} 位模特 · ${allSets.length} 套图集 · ${allSets.reduce((n, s) => n + (s.imageCount || 0), 0)} 张${bytes ? ` · 合计 <b class="size-strong">${esc(fmtSize(bytes))}</b>` : ''}</p>
+    <p class="sub">共 ${entries.length} 位模特</p>
   </div>
-  <div class="grid">${cards}</div>
-  <p class="more-hint"><a href="index.html" class="dim">看全部图集 →</a></p>`
+  <div class="grid grid-sm" id="modelGrid" data-unit="位模特">${cards}</div>
+  <p class="empty" id="modelEmpty" hidden>没有匹配的模特</p>
+  <div class="grid-sentinel" id="modelSentinel" aria-hidden="true"></div>
+  <p class="grid-end" id="modelEnd" hidden></p>`
   return layout({
     title: `模特列表 - ${config.siteName}`,
     desc: `${config.siteName} 收录的全部模特，共 ${entries.length} 位、${allSets.length} 套图集。`,
@@ -1202,15 +1199,14 @@ img{max-width:100%;display:block}
 .page-head h1{margin:0;font-size:22px}
 .page-head .sub{color:var(--dim);margin:4px 0 0;font-size:13px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px}   /* 桌面一行 5 张 */
-/* 模特页的作品网格：小方卡（一行约 8 张），只有封面 + 标题 + 标签，不放头像和日期行 */
-.grid-model{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px}
-.grid-model .card-cover{aspect-ratio:1/1}
-.grid-model .card-title{padding:8px 8px 4px;font-size:12.5px;line-height:1.4;-webkit-line-clamp:2}
-.grid-model .card-meta{padding:0 8px 8px;gap:4px;font-size:10.5px}
-.grid-model .card-meta .tag{font-size:10.5px;padding:1px 6px}
-.grid-model .badge{font-size:10px;padding:1px 6px}
-.grid-model .badge-lock{padding:2px 7px;font-size:10.5px}
-.grid-model .ic-lock{width:9px;height:9px}
+/* 全部模特页：小方卡（一行约 8 张），只有方形封面 + 名字 + 标签 */
+.grid-sm{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px}
+.grid-sm .card-cover{aspect-ratio:1/1}
+.grid-sm .card-title{padding:8px 8px 4px;font-size:12.5px;line-height:1.4;-webkit-line-clamp:2}
+.grid-sm .card-meta{padding:0 8px 8px;gap:4px;font-size:10.5px}
+.grid-sm .card-chips{gap:4px;min-height:0}
+.grid-sm .card-meta .tag{font-size:10.5px;padding:1px 6px}
+.grid-sm .badge{font-size:10px;padding:1px 6px}
 /* 卡片：选中/悬停不出现彩色描边，改成"图片轻微放大 + 轻微抬起投影" */
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
   transition:transform .2s ease,box-shadow .2s ease}
@@ -1712,10 +1708,10 @@ html[data-theme="light"] .pn-input{background:rgba(255,255,255,.7);border-color:
   /* 标签页：手机上排序按钮和搜索框各占一行更顺手 */
   #sq{flex:1 1 100%;max-width:none}}
 @media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
-  /* 模特页：手机上作品卡再小一点，一行 3 张 */
-  .grid.grid-model{grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:10px}
-  .grid-model .card-title{font-size:12px;padding:7px 7px 3px}
-  .grid-model .card-meta{padding:0 7px 7px}
+  /* 全部模特页：手机上一行 3 个 */
+  .grid.grid-sm{grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:10px}
+  .grid-sm .card-title{font-size:12px;padding:7px 7px 3px}
+  .grid-sm .card-meta{padding:0 7px 7px}
   .prevnext{grid-template-columns:1fr}.detail-title{font-size:18px}}`
 
 const PSWP_EXTRA = `/* PhotoSwipe 主题微调（暗色站风格） */
@@ -2471,7 +2467,7 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
       if (mempty) mempty.hidden = hits !== 0;
       if (mend) {
         mend.hidden = !(hits > 0 && hits <= mShown);
-        mend.textContent = '已全部加载 · 共 ' + hits + ' 套';
+        mend.textContent = '已全部加载 · 共 ' + hits + (mgrid.getAttribute('data-unit') || '套');
       }
       if (msentinel) msentinel.hidden = hits <= mShown;   // 加载完了就把哨兵撤掉，别再触发
       mFill();
