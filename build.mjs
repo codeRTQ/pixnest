@@ -560,9 +560,15 @@ function cardModelRow(s, rel = '', opts = {}) {
 /** 日期显示成 2026/09/13 这种斜杠格式（datetime 属性仍用标准 ISO 写法） */
 const slashDate = (d) => String(d || '').replace(/-/g, '/')
 
+/** 卡片上的检索/排序用数据（模特页的本地搜索、排序、"加载更多"都靠它）；
+    隐藏套图不暴露张数与体积，一律按 0 处理 */
+const cardData = (s) => ` data-slug="${esc(s.slug)}" data-date="${esc(s.date || '')}"`
+  + ` data-count="${s.hidden ? 0 : (s.imageCount || 0)}" data-bytes="${s.hidden ? 0 : (s.bytes || 0)}"`
+  + ` data-title="${esc(((s.displayTitle || s.title) + ' ' + (s.model || '') + ' ' + (s.series || '') + ' ' + s.tags.join(' ') + ' ' + (s.date || '')).toLowerCase())}"`
+
 const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   // 隐藏但没配密码（构建时算不出私有地址）→ 只给一张糊图，没有任何入口
-  ? `<article class="card card-locked" data-hid="${esc(s.slug)}">
+  ? `<article class="card card-locked" data-hid="${esc(s.slug)}"${cardData(s)}>
   <div class="card-cover locked"${s.coverLqip ? ` style="background-image:url(${s.coverLqip})"` : ''}>
     ${s.blurThumb ? `<img class="blurred" src="${blurUrl(s.slug, rel)}" alt="">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
@@ -572,7 +578,7 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   <div class="card-meta"><span class="lock-hint">还没设置隐藏密码</span></div>
 </article>`
   : s.hiddenOk
-  ? `<article class="card card-locked" data-hid="${esc(s.slug)}"${s.blurThumb ? ` data-cover="${esc(s.coverThumb || '')}"` : ''}>
+  ? `<article class="card card-locked" data-hid="${esc(s.slug)}"${s.blurThumb ? ` data-cover="${esc(s.coverThumb || '')}"` : ''}${cardData(s)}>
   <div class="card-cover locked"${s.coverLqip ? ` style="background-image:url(${s.coverLqip})"` : ''}>
     ${s.blurThumb ? `<img class="blurred"${opts.eager ? '' : ' loading="lazy"'} src="${blurUrl(s.slug, rel)}" alt="${esc(s.title)}">` : '<div class="no-cover">🔒</div>'}
     <span class="badge badge-lock">🔒 隐藏</span>
@@ -585,7 +591,7 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   </div>
 </article>`
   : `
-<article class="card" data-title="${esc((s.displayTitle + ' ' + s.model + ' ' + s.tags.join(' ')).toLowerCase())}">
+<article class="card"${cardData(s)}>
   <a class="card-link cover-link" href="${rel}set/${s.slug}/index.html" aria-label="${esc(s.title)}">
     <div class="card-cover"${s.coverLqip ? ` style="background-image:url(${s.coverLqip})"` : ''}>
       ${s.coverFile
@@ -791,17 +797,38 @@ function modelPage(name, list, rel = '../') {
   const imgs = list.reduce((n, s) => n + (s.imageCount || 0), 0)
   const latest = list.map(s => s.date || '').sort().pop() || ''
   const seriesList = [...new Set(list.map(s => s.series).filter(Boolean))]
+  // 标签分类：这位模特的图集里出现过的标签，按出现次数排（点进去是对应标签页）
+  // 只放前 12 个，剩下的走「全部标签」入口 —— 手机上二十几个芯片会把抬头撑很高
+  const tagCount = {}
+  list.forEach(s => s.tags.forEach(t => { tagCount[t] = (tagCount[t] || 0) + 1 }))
+  const allTags = Object.entries(tagCount).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
+  const tagList = allTags.slice(0, 12)
   const body = `
   <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}models.html">模特</a><span>/</span><span class="cur">${esc(name)}</span></nav>
-  <div class="page-head model-head">
-    <h1>${avatarHtml(name, rel, 'md') || '👤 '}${esc(name)}</h1>
-    <p class="sub">共 ${list.length} 套图集 · ${imgs} 张${bytes ? ` · 合计 <b class="size-strong">${esc(fmtSize(bytes))}</b>` : ''}${latest ? ` · 最新 ${esc(latest)}` : ''}</p>
-  </div>
+  <header class="model-top">
+    <div class="mt-art">${avatarHtml(name, rel, 'lg') || (setCoverUrl(list[0], rel) ? `<img loading="lazy" src="${setCoverUrl(list[0], rel)}" alt="${esc(name)}">` : '<span class="mt-ph">👤</span>')}</div>
+    <div class="mt-main">
+      <h1>${esc(name)}</h1>
+      <p class="mt-stats">共 <b>${list.length}</b> 套作品${imgs ? ` · ${imgs} 张` : ''}${bytes ? ` · 合计 <b class="size-strong">${esc(fmtSize(bytes))}</b>` : ''}${latest ? ` · 最新 ${esc(slashDate(latest))}` : ''}</p>
+      ${(seriesList.length || tagList.length) ? `<div class="mt-chips">
+        ${seriesList.map(n => `<a class="cloud-chip" href="${rel}series/${encodeURIComponent(n)}.html">${esc(n)}<span>${list.filter(s => s.series === n).length}</span></a>`).join('')}
+        ${tagList.map(([t, n]) => `<a class="cloud-chip cloud-tag" href="${rel}tag/${encodeURIComponent(t)}.html">#${esc(t)}<span>${n}</span></a>`).join('')}
+        ${allTags.length > tagList.length ? `<a class="cloud-chip cloud-tag cloud-more" href="${rel}collections.html">全部 ${allTags.length} 个标签 →</a>` : ''}
+      </div>` : ''}
+    </div>
+  </header>
   ${profileQuoteHtml(pf)}
-  ${seriesList.length ? `<div class="chips-cloud" style="margin:0 0 18px">${seriesList.map(n =>
-    `<a class="cloud-chip" href="${rel}series/${encodeURIComponent(n)}.html">${esc(n)}<span>${list.filter(s => s.series === n).length}</span></a>`).join('')}</div>` : ''}
-  <div class="grid">${list.map((s, i) => card(s, rel, { noModel: true, eager: i < 8 })).join('')}</div>
-  <p class="more-hint"><a href="${rel}models.html" class="dim">← 全部模特</a></p>`
+  <div class="filters" id="modelFilters">
+    <input id="mq" type="search" placeholder="在这 ${list.length} 套作品里搜标题 / 标签" aria-label="搜索该模特的作品">
+    <span class="sort-chips" id="modelSort" role="group" aria-label="排序方式">
+      <button type="button" class="on" data-sort="date-desc">最新</button>
+      <button type="button" data-sort="count-desc">热门</button>
+      <button type="button" data-sort="date-hot">最近热门</button>
+    </span>
+  </div>
+  <div class="grid" id="modelGrid">${list.map((s, i) => card(s, rel, { noModel: true, eager: i < 8 })).join('')}</div>
+  <p class="empty" id="modelEmpty" hidden>没有匹配的作品，换个词试试</p>
+  <div class="load-more-wrap" id="modelMoreWrap" hidden><button type="button" class="load-more" id="modelMore">加载更多</button></div>`
   const url = pageUrl(`model/${encodeURIComponent(name)}.html`)
   return layout({
     title: `${name} 的全部作品（${list.length} 套） - ${config.siteName}`,
@@ -822,6 +849,7 @@ function modelsIndexPage(byModel, allSets) {
   const cards = entries.map(([name, list]) => {
     const pf = modelProfile(name)
     // 封面：优先该模特最新一套**公开**图集；全是隐藏套图时用公开的模糊小图（否则会 404）
+    // data-hid/data-cover 挂在图片上：解锁后这张糊图会自动换成真封面（整张卡仍然点进模特页）
     const latest = list.slice().sort((a, b) => cmpDateDesc(a, b))[0]
     const face = list.filter(s => !s.hidden && s.coverFile).sort((a, b) => cmpDateDesc(a, b))[0] || latest
     const b = list.reduce((n, s) => n + (s.bytes || 0), 0)
@@ -831,7 +859,7 @@ function modelsIndexPage(byModel, allSets) {
     <a class="card-link cover-link" href="model/${encodeURIComponent(name)}.html" aria-label="${esc(name)}">
       <div class="card-cover"${face.coverLqip ? ` style="background-image:url(${face.coverLqip})"` : ''}>
         ${setCoverUrl(face)
-          ? `<img loading="lazy"${face.hidden ? ' class="blurred"' : ''} src="${setCoverUrl(face)}" alt="${esc(name)}">`
+          ? `<img loading="lazy"${face.hidden ? ` class="blurred" data-hid="${esc(face.slug)}"${face.coverThumb ? ` data-cover="${esc(face.coverThumb)}"` : ''}` : ''} src="${setCoverUrl(face)}" alt="${esc(name)}">`
           : '<div class="no-cover">无封面</div>'}
         <span class="badge">${list.length} 套</span>
         ${b ? `<span class="badge badge-size">${esc(fmtSize(b))}</span>` : ''}
@@ -874,7 +902,7 @@ function seriesIndexPage(bySeries, allSets) {
     <a class="card-link" href="series/${encodeURIComponent(name)}.html">
       <div class="card-cover"${face.coverLqip ? ` style="background-image:url(${face.coverLqip})"` : ''}>
         ${setCoverUrl(face)
-          ? `<img loading="lazy"${face.hidden ? ' class="blurred"' : ''} src="${setCoverUrl(face)}" alt="${esc(name)}">`
+          ? `<img loading="lazy"${face.hidden ? ` class="blurred" data-hid="${esc(face.slug)}"${face.coverThumb ? ` data-cover="${esc(face.coverThumb)}"` : ''}` : ''} src="${setCoverUrl(face)}" alt="${esc(name)}">`
           : '<div class="no-cover">无封面</div>'}
         <span class="badge">${list.length} 套</span>
         ${b ? `<span class="badge badge-size">${esc(fmtSize(b))}</span>` : ''}
@@ -1204,7 +1232,36 @@ img{max-width:100%;display:block}
 .mavatar-xs{width:24px;height:24px}
 .mavatar-sm{width:38px;height:38px}
 .mavatar-md{width:64px;height:64px;border-width:2px}
+.mavatar-lg{width:96px;height:96px;border-width:2px}
 .page-head.model-head h1{display:flex;align-items:center;gap:12px}
+/* ── 模特页抬头：大圆头像 + 作品数 + 标签分类（系列 / 标签芯片）── */
+.model-top{display:flex;gap:18px;align-items:flex-start;margin:14px 0 18px}
+.mt-art{flex:0 0 auto;width:96px;height:96px;border-radius:50%;overflow:hidden;background:var(--panel2);
+  border:1px solid var(--line);display:flex;align-items:center;justify-content:center}
+.mt-art img{width:100%;height:100%;object-fit:cover;display:block}
+.mt-art .mavatar-lg{width:100%;height:100%;border:0}
+.mt-ph{font-size:34px;color:var(--dim)}
+.mt-main{min-width:0;flex:1}
+.mt-main h1{margin:2px 0 6px;font-size:22px;line-height:1.3}
+.mt-stats{margin:0;color:var(--dim);font-size:13px;line-height:1.7}
+.mt-stats b{color:var(--fg)}
+.mt-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.mt-chips .cloud-chip{padding:4px 11px;font-size:12.5px;border-radius:999px}
+.mt-chips .cloud-chip span{padding:0 7px;font-size:11.5px}
+.cloud-tag{color:var(--dim)}
+.cloud-tag:hover{color:var(--accent);border-color:var(--accent)}
+/* 模特页筛选行：搜索框 + 三个排序按钮（和列表页同一套紧凑样式） */
+#modelFilters{gap:10px}
+#modelFilters input[type=search]{flex:1;min-width:180px;max-width:320px;height:32px;padding:0 13px;border-radius:10px;
+  border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;font-size:13px;outline:none}
+#modelFilters input[type=search]:focus{border-color:var(--accent)}
+#modelFilters input[type=search]::placeholder{color:var(--dim)}
+/* 加载更多 */
+.load-more-wrap{display:flex;justify-content:center;margin:22px 0 8px}
+.load-more{font:inherit;font-size:13.5px;font-weight:600;height:40px;padding:0 26px;border-radius:10px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel);color:var(--fg);transition:.15s}
+.load-more:hover{border-color:var(--accent);color:var(--accent)}
+.load-more[disabled]{cursor:default;color:var(--dim);border-color:var(--line)}
 .card-meta a.tag:hover,.detail-meta a.tag:hover{color:var(--accent);border-color:var(--accent);background:rgba(91,140,255,.12)}
 .pager{display:flex;align-items:center;justify-content:center;gap:18px;margin:34px 0}
 /* 筛选栏：跟着页面往下滚时贴住头部下方（吸顶），方便一边看一边换排序/去掉筛选。
@@ -1544,6 +1601,17 @@ html[data-theme="light"] .pf-quote{background:linear-gradient(90deg,rgba(47,107,
   .hero-info{gap:5px}
   .hero-info h2{font-size:16.5px}
   .hero-meta{font-size:12px}
+  /* 模特页：头像缩小、搜索框独占一行，筛选行不再吸顶（两行吸顶太占屏） */
+  .model-top{gap:13px;margin:12px 0 14px}
+  .mt-art{width:72px;height:72px}
+  .mt-main h1{font-size:19px;margin:0 0 5px}
+  .mt-stats{font-size:12.5px}
+  .mt-chips{margin-top:8px;gap:5px}
+  .mt-chips .cloud-chip{padding:3px 10px;font-size:12px}
+  .mt-chips .cloud-chip span{padding:0 6px;font-size:11px}
+  #modelFilters{position:static;padding:10px 0}
+  #modelFilters input[type=search]{flex:1 0 100%;max-width:none}
+  .load-more{height:38px;padding:0 20px;font-size:13px}
 }
 @media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.prevnext{grid-template-columns:1fr}.detail-title{font-size:18px}}`
 
@@ -1654,7 +1722,8 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     el.classList.add('unlocked');
     el.setAttribute('data-url', url);
     var cov = el.getAttribute('data-cover');
-    var img = el.querySelector('img.blurred');
+    // 有的地方 data-hid 直接挂在 <img> 上（模特/系列列表页的封面），这里要兼容
+    var img = el.tagName === 'IMG' ? el : el.querySelector('img.blurred');
     if (img) {
       keepAttr(el, 'data-blursrc', img.getAttribute('src'));
       if (cov) {
@@ -1689,7 +1758,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
   var downgradeEl = function (el) {
     el.classList.remove('unlocked');
     el.removeAttribute('data-url');
-    var img = el.querySelector('img');
+    var img = el.tagName === 'IMG' ? el : el.querySelector('img');
     var src = el.getAttribute('data-blursrc');
     if (img && src) { img.src = src; img.classList.add('blurred'); }
     el.removeAttribute('data-blursrc');
@@ -2113,6 +2182,61 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       // 函数都就位了，现在才安全地按 URL 里的 ?q= 渲染初始结果
       if (q0) renderList(q0.toLowerCase());
     }).catch((e) => { console.error('[列表页]', e); });
+  }
+
+  // ── 模特页：本地搜索 / 排序 / 「加载更多」──
+  // 卡片在构建时已经全部渲染好，这里只做显隐与重排：先摆 10 张，点按钮再放一批
+  var mgrid = document.getElementById('modelGrid');
+  if (mgrid) {
+    var mcards = [].slice.call(mgrid.querySelectorAll('.card'));
+    var mmore = document.getElementById('modelMore');
+    var mwrap = document.getElementById('modelMoreWrap');
+    var mempty = document.getElementById('modelEmpty');
+    var mq = document.getElementById('mq');
+    var msort = document.getElementById('modelSort');
+    var M_FIRST = 10, M_STEP = 20;
+    var mShown = M_FIRST, MS = 'date-desc';
+    var attr = function (c, k) { return c.getAttribute(k) || ''; };
+    var byDate = function (a, b) {
+      return attr(b, 'data-date').localeCompare(attr(a, 'data-date')) || attr(b, 'data-slug').localeCompare(attr(a, 'data-slug'));
+    };
+    var mOrder = function () {
+      var arr = mcards.slice();
+      if (MS === 'count-desc') arr.sort(function (a, b) { return (+attr(b, 'data-count') - +attr(a, 'data-count')) || byDate(a, b); });
+      else if (MS === 'date-hot') arr.sort(function (a, b) {
+        return attr(b, 'data-date').localeCompare(attr(a, 'data-date')) || (+attr(b, 'data-count') - +attr(a, 'data-count')) || byDate(a, b);
+      });
+      else arr.sort(byDate);
+      arr.forEach(function (c) { mgrid.appendChild(c); });
+      return arr;
+    };
+    var mPaint = function () {
+      var q = (mq && mq.value || '').trim().toLowerCase();
+      var hits = 0;
+      mOrder().forEach(function (c) {
+        var hit = !q || attr(c, 'data-title').indexOf(q) >= 0;
+        if (hit) hits++;
+        c.hidden = !(hit && hits <= mShown);
+      });
+      if (mempty) mempty.hidden = hits !== 0;
+      if (mwrap) mwrap.hidden = hits <= mShown;
+      if (mmore) {
+        var rest = Math.max(0, hits - mShown);
+        mmore.textContent = rest ? '加载更多（还有 ' + rest + ' 套）' : '已全部加载';
+        mmore.disabled = !rest;
+      }
+    };
+    if (msort) msort.addEventListener('click', function (e) {
+      var btn = e.target.closest('button[data-sort]');
+      if (!btn) return;
+      MS = btn.dataset.sort || 'date-desc';
+      msort.querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b === btn); });
+      mShown = M_FIRST;
+      mPaint();
+    });
+    if (mq) mq.addEventListener('input', function () { mShown = M_FIRST; mPaint(); });
+    if (mmore) mmore.addEventListener('click', function () { mShown += M_STEP; mPaint(); });
+    mPaint();
   }
 
   // 详情页预览：行式铺满布局（每行 2~3 张，横向铺满整行，图片保持原比例不裁剪）
