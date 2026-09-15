@@ -442,33 +442,34 @@ function relatedSets(set, all, limit = config.relatedCount || 4) {
     .map(x => x.s)
 }
 
-/** 系列页 / 标签页（静态化，利于搜索引擎收录） */
+/** 系列页 / 标签页（静态化，利于搜索引擎收录）
+ *  版式跟首页列表一致：抬头 → 排序按钮（吸顶）→ 卡片 → 分页；
+ *  卡片先静态渲染一页（SEO/无 JS 也能看），交互由 APP 里的"范围内列表"接管（搜索/排序/翻页都在这个标签内） */
 function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
   const label = kind === 'series' ? '系列' : '标签'
-  // 该分类的合计体量：套数 + 张数 + 总大小（按每套真实字节累加）
-  const catBytes = sets.reduce((n, s) => n + (s.bytes || 0), 0)
-  const catCount = sets.reduce((n, s) => n + (s.imageCount || 0), 0)
-  const catSize = catBytes ? fmtSize(catBytes) : ''
-  const cloudHtml = cloud.length
-    ? `<section class="cloud-sec">
-    <h2 class="sec-title">全部${label}（${cloud.length}）<span class="dim" style="font-size:13px;font-weight:400"> · 点任意一个直接切换</span></h2>
-    <div class="chips-cloud">${cloud.map(([n, list]) =>
-      `<a class="cloud-chip${n === name ? ' on' : ''}" href="${rel}${kind}/${encodeURIComponent(n)}.html">${kind === 'tag' ? '#' : ''}${esc(n)}<span>${Array.isArray(list) ? list.length : list}</span></a>`).join('')}</div>
-  </section>`
-    : ''
+  const per = config.setsPerPage || 20
+  const firstPage = sets.slice(0, per)
   const body = `
   <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}collections.html#${kind}">${label}</a><span>/</span><span class="cur">${esc(name)}</span></nav>
-  <div class="page-head">
-    <h1>${esc(name)}</h1>
-    <p class="sub">${label}「${esc(name)}」共 ${sets.length} 套图集${catSize ? ` · ${catCount} 张 · 合计 <b class="size-strong">${esc(catSize)}</b>` : ''}</p>
+  <header class="coll-head">
+    <span class="coll-kind">${label}</span>
+    <h1>${kind === 'tag' ? '#' : ''}${esc(name)}</h1>
+  </header>
+  <div class="page-head" hidden></div>
+  <div class="filters" id="filters">
+    <span class="sort-chips" id="sortChips" role="group" aria-label="排序方式">
+      <button type="button" class="on" data-sort="date-desc">最新</button>
+      <button type="button" data-sort="count-desc">热门</button>
+      <button type="button" data-sort="date-hot">最近热门</button>
+    </span>
   </div>
-  <div class="grid">${sets.map((s, i) => card(s, rel, { eager: i < 8 })).join('')}</div>
-  <p class="more-hint"><a href="${rel}index.html" class="dim">← 返回全部图集</a></p>
-  ${cloudHtml}`
+  <div class="grid" id="grid" data-scope="${kind}" data-scope-name="${esc(name)}">${firstPage.map((s, i) => card(s, rel, { eager: i < 8 })).join('')}</div>
+  <p class="empty" id="empty" hidden>没有匹配的图集</p>
+  <div id="clientPager"></div>`
   const url = pageUrl(`${kind === 'series' ? 'series' : 'tag'}/${encodeURIComponent(name)}.html`)
   return layout({
     title: `${name} · ${label} - ${config.siteName}`,
-    desc: `${label}「${name}」下的全部图集，共 ${sets.length} 套${catSize ? `、${catCount} 张、合计 ${catSize}` : ''}。${config.siteSubtitle}`,
+    desc: `${label}「${name}」下的全部图集，共 ${sets.length} 套。${config.siteSubtitle}`,
     body, rel,
     canonical: url,
     og: { type: 'website', url },
@@ -1274,6 +1275,13 @@ img{max-width:100%;display:block}
 .mavatar-md{width:64px;height:64px;border-width:2px}
 .mavatar-lg{width:96px;height:96px;border-width:2px}
 .page-head.model-head h1{display:flex;align-items:center;gap:12px}
+/* ── 标签页 / 系列页抬头：和模特页同一套"名片"样式 ── */
+.coll-head{display:flex;align-items:center;gap:12px;margin:14px 0 16px;padding:14px 18px;
+  border:1px solid var(--line);border-radius:16px;
+  background:linear-gradient(180deg,rgba(91,140,255,.14),rgba(91,140,255,.035) 58%,rgba(91,140,255,0) 100%),var(--panel)}
+.coll-kind{flex:0 0 auto;font-size:12px;font-weight:600;color:var(--accent);
+  background:rgba(91,140,255,.16);border:1px solid rgba(91,140,255,.42);border-radius:999px;padding:3px 12px}
+.coll-head h1{margin:0;font-size:22px;line-height:1.25;letter-spacing:-.01em;min-width:0;overflow-wrap:anywhere}
 /* ── 模特页抬头：圆头像 + 名字 + 一句话自我介绍 + 作品数 + 热门标签 ──
    整块做成一张"名片"：顶部一层淡蓝渐变往下淡出，卡片自身收边，和下面的筛选/瀑布流分开 */
 .model-top{display:flex;gap:18px;align-items:center;margin:14px 0 20px;padding:16px 18px;
@@ -2064,7 +2072,17 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
   const input = document.getElementById('q');
   const empty = document.getElementById('empty');
   if (grid) {
-    const base = location.pathname.includes('/page/') ? '../../' : '';
+    // 范围内列表（标签页/系列页）：搜索、排序、翻页都只在这个标签/系列内进行
+    const SCOPE = grid.dataset.scope
+      ? { kind: grid.dataset.scope, name: grid.dataset.scopeName || '' }
+      : null;
+    // 站根相对前缀：/page/N.html 在 dist/page/ 下要退两级；标签页/系列页在子目录里退一级；首页不用退
+    const base = location.pathname.includes('/page/') ? '../../' : (SCOPE ? '../' : '');
+    const inScope = (s) => !SCOPE || (SCOPE.kind === 'tag'
+      ? (s.tags || []).indexOf(SCOPE.name) >= 0
+      : s.series === SCOPE.name);
+    // 范围内没有静态分页（page/N.html），所以永远用客户端分页
+    const clearHref = SCOPE ? location.pathname : base + 'index.html';
     let INDEX = null;
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     // 模特行：头像 + 模特名 + 日期（与静态卡片保持一致）
@@ -2081,7 +2099,7 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
       '<article class="card card-locked" data-hid="' + esc(s.slug) + '" data-cover="' + esc(s.cthumb || '') + '">',
       '<div class="card-cover locked">',
       (s.cover ? '<img class="blurred" loading="lazy" src="' + base + s.cover + '" alt="' + esc(s.title) + '">' : '<div class="no-cover">🔒</div>'),
-      '<span class="badge badge-lock">' + LOCK_SVG_JS + '隐藏</span>',
+      '<button class="badge badge-lock unlock-btn" title="这套图已隐藏，输入密码后查看">' + LOCK_SVG_JS + '隐藏</button>',
       '</div>',
       '<h2 class="card-title">' + esc(s.title) + '</h2>',
       '<div class="card-model">',
@@ -2089,15 +2107,14 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
       '</div>',
       '<div class="card-meta">',
       (s.dupTag && s.dupTag !== s.model ? '<span class="tag tag-model">' + esc(s.dupTag) + '</span>' : ''),
-      '<button class="unlock-btn">🔓 输入密码查看</button>',
+      (s.series ? '<a class="tag tag-series" href="' + base + 'series/' + encodeURIComponent(s.series) + '.html">' + esc(s.series) + '</a>' : ''),
+      (s.tags || []).slice(0, 2).map(t => '<a class="tag tag-link" href="' + base + 'tag/' + encodeURIComponent(t) + '.html">' + esc(t) + '</a>').join(''),
       '</div></article>',
     ].join('') : [
       '<article class="card">',
       '<a class="card-link cover-link" href="' + base + 'set/' + encodeURIComponent(s.slug) + '/index.html" aria-label="' + esc(s.title) + '">',
       '<div class="card-cover">',
       (s.cover ? '<img loading="lazy" src="' + base + s.cover + '" alt="' + esc(s.title) + '">' : '<div class="no-cover">无封面</div>'),
-      '<span class="badge">' + s.imageCount + 'P</span>',
-      (s.size || s.packSize ? '<span class="badge badge-size">' + esc(s.size || s.packSize) + '</span>' : ''),
       (s.pinned ? '<span class="badge badge-pin" title="置顶推荐">📌 置顶</span>' : ''),
       '</div>',
       '</a>',
@@ -2151,13 +2168,14 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
       if (q0 && input) input.value = q0;
       if (input) {
         let t = null;
+        const urlBase = SCOPE ? location.pathname : base + 'index.html';
         input.addEventListener('input', () => {
           clearTimeout(t);
           t = setTimeout(() => {
             const q = input.value.trim().toLowerCase();
             curPage = 1;
             renderList(q);
-            const url = q ? (base + 'index.html?q=' + encodeURIComponent(input.value.trim())) : (base + 'index.html');
+            const url = q ? (urlBase + '?q=' + encodeURIComponent(input.value.trim())) : urlBase;
             history.replaceState(null, '', url);
           }, 180);
         });
@@ -2205,7 +2223,7 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
           + '</div></div>';
       };
       const renderList = (q) => {
-        const all = applySort(INDEX.sets.filter(s => hits(s, q)));
+        const all = applySort(INDEX.sets.filter(s => inScope(s) && hits(s, q)));
         // 客户端分页：沿用同一套 Bootstrap 分页类名，搜索结果多时不再一屏铺完
         const PER = 20;   // 与 setsPerPage 一致：20 能被 5（桌面）/2（手机）整除，每页都是整行
         const pages = Math.max(1, Math.ceil(all.length / PER));
@@ -2223,16 +2241,17 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
           const isDefaultSort = SORT === 'date-desc';
           if (q) {
             head.hidden = false;
-            head.innerHTML = '<h1>搜索结果</h1><p class="sub">匹配「' + esc(q) + '」共 ' + all.length + ' 套'
+            head.innerHTML = '<h1>搜索结果</h1><p class="sub">'
+              + (SCOPE ? '在「' + esc(SCOPE.name) + '」里' : '') + '匹配「' + esc(q) + '」共 ' + all.length + ' 套'
               + (isDefaultSort ? '' : ' · 按' + esc(sortLabel))
-              + ' · <a href="' + base + 'index.html" class="dim">清除筛选</a></p>';
+              + ' · <a href="' + clearHref + '" class="dim">清除筛选</a></p>';
           } else {
             head.hidden = true;
             head.innerHTML = '';
           }
         }
-        // 静态分页只在没筛选时显示；筛选时用客户端分页（注意别抓错元素：客户端那条也在 .pagination-wrap 里）
-        const isFiltered = !!q || SORT !== 'date-desc';
+        // 静态分页只在没筛选时显示；筛选/排序或标签页（没有静态分页）时用客户端分页
+        const isFiltered = !!q || SORT !== 'date-desc' || !!SCOPE;
         const staticPager = document.querySelector('.static-pager');
         if (staticPager) staticPager.hidden = isFiltered;
         if (clientPager) {
@@ -2345,6 +2364,7 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
       }
       // 函数都就位了，现在才安全地按 URL 里的 ?q= 渲染初始结果
       if (q0) renderList(q0.toLowerCase());
+      else if (SCOPE) renderList('');    // 标签/系列页没有静态分页，进来就用客户端分页接管
     }).catch((e) => { console.error('[列表页]', e); });
   }
 
@@ -3058,8 +3078,10 @@ function build() {
     sets: sets.map(s => ({
       slug: s.slug, title: s.title, displayTitle: s.displayTitle,
       series: s.series, model: s.model, date: s.date, addedAt: s.addedAt, tags: s.tags,
-      imageCount: s.hidden ? 0 : s.imageCount, packSize: s.hidden ? '' : s.packSize,
-      size: s.hidden ? '' : s.sizeText, bytes: s.hidden ? 0 : s.bytes,
+      // 张数/体积写真实值：只用来排序（热门/最近热门），卡片上不显示；
+      // 隐藏套图的张数在 slug 里本来就公开（xx-28p-447mb），写 0 会让排序失效
+      imageCount: s.imageCount, packSize: s.packSize,
+      size: s.sizeText, bytes: s.bytes || 0,
       pinned: !!s.pinned && !s.hidden, pinOrder: s.pinOrder || 0,
       locked: !!s.hidden,
       cthumb: s.hidden ? (s.coverThumb || '') : '',        // 解锁后要换上的真封面文件名（隐藏项不提前暴露路径）
