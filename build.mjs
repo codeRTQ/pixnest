@@ -1232,7 +1232,10 @@ img{max-width:100%;display:block}
 .card-locked .card-cover .blurred,.blurred{filter:blur(2px) saturate(.8) brightness(.92);transform:scale(1.06);
   transform-origin:center;backface-visibility:hidden}
 .card-locked .card-title{color:var(--dim)}
-.badge-lock{background:rgba(0,0,0,.66);color:#ffd9a0;border:1px solid rgba(255,180,84,.45)}
+/* 隐藏标识：实心琥珀色药丸 + 深色字，压在模糊封面上也一眼能看清（和「📌 置顶」同一套配色）
+   注意要压过下面的 .unlock-btn 规则（它把按钮做成了描边淡底），所以这里写两个选择器 */
+.badge-lock,.badge-lock.unlock-btn{background:#ffb454;color:#1a1206;border:1px solid rgba(255,255,255,.5);
+  font-weight:600;padding:3px 10px;box-shadow:0 2px 10px rgba(0,0,0,.45);letter-spacing:.01em}
 .lock-hint{font-size:12px;color:var(--dim)}
 .unlock-btn{font:inherit;font-size:12px;padding:4px 12px;border-radius:999px;cursor:pointer;
   border:1px solid rgba(255,180,84,.5);background:rgba(255,180,84,.12);color:var(--accent2);transition:.15s}
@@ -1642,8 +1645,8 @@ html[data-theme="light"] .pn-input{background:rgba(255,255,255,.7);border-color:
 .pn-btn-primary:hover{filter:brightness(1.08);color:#fff}
 .pn-btn[disabled]{opacity:.55;cursor:default}
 /* 隐藏卡的左上角「隐藏」按钮：点它输密码 */
-.badge-lock{cursor:pointer;font:inherit;font-size:11px;line-height:1.6}
-.badge-lock:hover{background:rgba(255,180,84,.22)}
+.badge-lock{cursor:pointer;font:inherit;font-size:11.5px;line-height:1.6}
+.badge-lock:hover,.badge-lock.unlock-btn:hover{background:#ffc46b;border-color:#fff}
 .ag-card{max-width:560px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px}
 .ag-card h2{margin:0 0 12px;font-size:18px}
 .ag-card p{margin:8px 0;font-size:14px;line-height:1.8}
