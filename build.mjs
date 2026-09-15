@@ -781,6 +781,23 @@ function profileBits(pf = {}) {
   })
   return { parts, socials }
 }
+/** 模特资料 → 简历式的字段列表（左标右值，两列排；没填任何字段就返回空串） */
+function profileResumeHtml(pf = {}) {
+  const { socials } = profileBits(pf)
+  const LABEL = { sign: '星座', city: '城市', style: '风格', other: '简介' }
+  const rows = []
+  PF_ORDER.forEach(([k, label]) => {
+    const v = String(pf[k] || '').trim()
+    if (!v) return
+    const lab = label || LABEL[k] || ''
+    // 简历式排版里左边已经有「出生」标签了，值就保持「1998 年」不再补字
+    rows.push(`<div class="cv-row${v.length > 26 ? ' cv-wide' : ''}"><dt>${esc(lab)}</dt><dd>${esc(v)}</dd></div>`)
+  })
+  if (!rows.length && !socials.length) return ''
+  return `<dl class="mt-cv">${rows.join('')}</dl>`
+    + (socials.length ? `<p class="mt-social">${socials.join('')}</p>` : '')
+}
+
 /** 模特资料 → 一段引文式 HTML（没填任何字段就返回空串） */
 function profileQuoteHtml(pf = {}, extraClass = '') {
   const { parts, socials } = profileBits(pf)
@@ -790,34 +807,32 @@ function profileQuoteHtml(pf = {}, extraClass = '') {
     + (socials.length ? `<p class="pf-social">${socials.join(' · ')}</p>` : '')
     + '</blockquote>'
 }
-/** 单个模特的页面：资料引文 + 该模特的全部图集（按系列分组时给出系列芯片）*/
+/** 单个模特的页面：头像旁的简历式资料 + 6 个热门标签 + 全部作品（搜索/排序 + 滚动自动加载）*/
 function modelPage(name, list, rel = '../') {
   const pf = modelProfile(name)
-  const bytes = list.reduce((n, s) => n + (s.bytes || 0), 0)
   const imgs = list.reduce((n, s) => n + (s.imageCount || 0), 0)
-  const latest = list.map(s => s.date || '').sort().pop() || ''
+  const bytes = list.reduce((n, s) => n + (s.bytes || 0), 0)
   const seriesList = [...new Set(list.map(s => s.series).filter(Boolean))]
-  // 标签分类：这位模特的图集里出现过的标签，按出现次数排（点进去是对应标签页）
-  // 只放前 12 个，剩下的走「全部标签」入口 —— 手机上二十几个芯片会把抬头撑很高
+  // 热门标签：出现次数最多的 6 个（点进去是对应标签页），其余走「全部标签」入口
   const tagCount = {}
   list.forEach(s => s.tags.forEach(t => { tagCount[t] = (tagCount[t] || 0) + 1 }))
   const allTags = Object.entries(tagCount).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
-  const tagList = allTags.slice(0, 12)
+  const tagList = allTags.slice(0, 6)
   const body = `
   <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}models.html">模特</a><span>/</span><span class="cur">${esc(name)}</span></nav>
   <header class="model-top">
     <div class="mt-art">${avatarHtml(name, rel, 'lg') || (setCoverUrl(list[0], rel) ? `<img loading="lazy" src="${setCoverUrl(list[0], rel)}" alt="${esc(name)}">` : '<span class="mt-ph">👤</span>')}</div>
     <div class="mt-main">
       <h1>${esc(name)}</h1>
-      <p class="mt-stats">共 <b>${list.length}</b> 套作品${imgs ? ` · ${imgs} 张` : ''}${bytes ? ` · 合计 <b class="size-strong">${esc(fmtSize(bytes))}</b>` : ''}${latest ? ` · 最新 ${esc(slashDate(latest))}` : ''}</p>
+      <p class="mt-stats">共 <b>${list.length}</b> 套作品</p>
+      ${profileResumeHtml(pf)}
       ${(seriesList.length || tagList.length) ? `<div class="mt-chips">
         ${seriesList.map(n => `<a class="cloud-chip" href="${rel}series/${encodeURIComponent(n)}.html">${esc(n)}<span>${list.filter(s => s.series === n).length}</span></a>`).join('')}
         ${tagList.map(([t, n]) => `<a class="cloud-chip cloud-tag" href="${rel}tag/${encodeURIComponent(t)}.html">#${esc(t)}<span>${n}</span></a>`).join('')}
-        ${allTags.length > tagList.length ? `<a class="cloud-chip cloud-tag cloud-more" href="${rel}collections.html">全部 ${allTags.length} 个标签 →</a>` : ''}
+        ${allTags.length > tagList.length ? `<a class="cloud-chip cloud-tag cloud-more" href="${rel}collections.html">全部标签 →</a>` : ''}
       </div>` : ''}
     </div>
   </header>
-  ${profileQuoteHtml(pf)}
   <div class="filters" id="modelFilters">
     <input id="mq" type="search" placeholder="在这 ${list.length} 套作品里搜标题 / 标签" aria-label="搜索该模特的作品">
     <span class="sort-chips" id="modelSort" role="group" aria-label="排序方式">
@@ -828,7 +843,8 @@ function modelPage(name, list, rel = '../') {
   </div>
   <div class="grid" id="modelGrid">${list.map((s, i) => card(s, rel, { noModel: true, eager: i < 8 })).join('')}</div>
   <p class="empty" id="modelEmpty" hidden>没有匹配的作品，换个词试试</p>
-  <div class="load-more-wrap" id="modelMoreWrap" hidden><button type="button" class="load-more" id="modelMore">加载更多</button></div>`
+  <div class="grid-sentinel" id="modelSentinel" aria-hidden="true"></div>
+  <p class="grid-end" id="modelEnd" hidden>已全部加载 · 共 ${list.length} 套</p>`
   const url = pageUrl(`model/${encodeURIComponent(name)}.html`)
   return layout({
     title: `${name} 的全部作品（${list.length} 套） - ${config.siteName}`,
@@ -1234,18 +1250,30 @@ img{max-width:100%;display:block}
 .mavatar-md{width:64px;height:64px;border-width:2px}
 .mavatar-lg{width:96px;height:96px;border-width:2px}
 .page-head.model-head h1{display:flex;align-items:center;gap:12px}
-/* ── 模特页抬头：大圆头像 + 作品数 + 标签分类（系列 / 标签芯片）── */
-.model-top{display:flex;gap:18px;align-items:flex-start;margin:14px 0 18px}
-.mt-art{flex:0 0 auto;width:96px;height:96px;border-radius:50%;overflow:hidden;background:var(--panel2);
-  border:1px solid var(--line);display:flex;align-items:center;justify-content:center}
+/* ── 模特页抬头：圆头像 + 名字 + 作品数 + 简历式资料 + 6 个热门标签 ── */
+.model-top{display:flex;gap:20px;align-items:flex-start;margin:14px 0 18px}
+.mt-art{flex:0 0 auto;width:104px;height:104px;border-radius:26px;overflow:hidden;background:var(--panel2);
+  border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
+  box-shadow:0 14px 30px -20px rgba(0,0,0,.55)}
 .mt-art img{width:100%;height:100%;object-fit:cover;display:block}
-.mt-art .mavatar-lg{width:100%;height:100%;border:0}
+.mt-art .mavatar-lg{width:100%;height:100%;border:0;border-radius:0}
 .mt-ph{font-size:34px;color:var(--dim)}
 .mt-main{min-width:0;flex:1}
-.mt-main h1{margin:2px 0 6px;font-size:22px;line-height:1.3}
+.mt-main h1{margin:0 0 4px;font-size:24px;line-height:1.25;letter-spacing:-.01em}
 .mt-stats{margin:0;color:var(--dim);font-size:13px;line-height:1.7}
-.mt-stats b{color:var(--fg)}
-.mt-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.mt-stats b{color:var(--fg);font-weight:600}
+/* 简历式资料：左标右值，桌面两列 / 手机一列 */
+.mt-cv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 26px;margin:12px 0 0;
+  padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.cv-row{display:flex;gap:10px;align-items:baseline;min-width:0;font-size:12.5px;line-height:1.8}
+.cv-row dt{flex:0 0 3.2em;color:var(--dim)}
+.cv-row dd{margin:0;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv-row.cv-wide{grid-column:1/-1}
+.cv-row.cv-wide dd{white-space:normal;text-overflow:clip}
+.mt-social{margin:8px 0 0;font-size:12.5px;color:var(--dim);display:flex;flex-wrap:wrap;gap:4px 14px}
+.mt-social a{color:var(--accent);text-decoration:none}
+.mt-social a:hover{text-decoration:underline}
+.mt-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 .mt-chips .cloud-chip{padding:4px 11px;font-size:12.5px;border-radius:999px}
 .mt-chips .cloud-chip span{padding:0 7px;font-size:11.5px}
 .cloud-tag{color:var(--dim)}
@@ -1256,12 +1284,9 @@ img{max-width:100%;display:block}
   border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit;font-size:13px;outline:none}
 #modelFilters input[type=search]:focus{border-color:var(--accent)}
 #modelFilters input[type=search]::placeholder{color:var(--dim)}
-/* 加载更多 */
-.load-more-wrap{display:flex;justify-content:center;margin:22px 0 8px}
-.load-more{font:inherit;font-size:13.5px;font-weight:600;height:40px;padding:0 26px;border-radius:10px;cursor:pointer;
-  border:1px solid var(--line);background:var(--panel);color:var(--fg);transition:.15s}
-.load-more:hover{border-color:var(--accent);color:var(--accent)}
-.load-more[disabled]{cursor:default;color:var(--dim);border-color:var(--line)}
+/* 滚动到底自动加载第 3 行：哨兵本身不显示，只用来触发 */
+.grid-sentinel{height:1px;margin-top:8px}
+.grid-end{text-align:center;color:var(--dim);font-size:12.5px;margin:20px 0 6px}
 .card-meta a.tag:hover,.detail-meta a.tag:hover{color:var(--accent);border-color:var(--accent);background:rgba(91,140,255,.12)}
 .pager{display:flex;align-items:center;justify-content:center;gap:18px;margin:34px 0}
 /* 筛选栏：跟着页面往下滚时贴住头部下方（吸顶），方便一边看一边换排序/去掉筛选。
@@ -1603,15 +1628,18 @@ html[data-theme="light"] .pf-quote{background:linear-gradient(90deg,rgba(47,107,
   .hero-meta{font-size:12px}
   /* 模特页：头像缩小、搜索框独占一行，筛选行不再吸顶（两行吸顶太占屏） */
   .model-top{gap:13px;margin:12px 0 14px}
-  .mt-art{width:72px;height:72px}
-  .mt-main h1{font-size:19px;margin:0 0 5px}
+  .mt-art{width:72px;height:72px;border-radius:20px}
+  .mt-main h1{font-size:19px;margin:0 0 3px}
   .mt-stats{font-size:12.5px}
+  .mt-cv{grid-template-columns:repeat(2,minmax(0,1fr));gap:3px 14px;padding:10px 12px;margin-top:10px}
+  .cv-row{font-size:12px;gap:8px;line-height:1.75}
+  .cv-row dt{flex:0 0 2.9em}
+  .mt-social{font-size:12px}
   .mt-chips{margin-top:8px;gap:5px}
   .mt-chips .cloud-chip{padding:3px 10px;font-size:12px}
   .mt-chips .cloud-chip span{padding:0 6px;font-size:11px}
   #modelFilters{position:static;padding:10px 0}
   #modelFilters input[type=search]{flex:1 0 100%;max-width:none}
-  .load-more{height:38px;padding:0 20px;font-size:13px}
 }
 @media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}.prevnext{grid-template-columns:1fr}.detail-title{font-size:18px}}`
 
@@ -2184,19 +2212,29 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     }).catch((e) => { console.error('[列表页]', e); });
   }
 
-  // ── 模特页：本地搜索 / 排序 / 「加载更多」──
-  // 卡片在构建时已经全部渲染好，这里只做显隐与重排：先摆 10 张，点按钮再放一批
+  // ── 模特页：本地搜索 / 排序 / 往下滚自动加载 ──
+  // 卡片在构建时已经全部渲染好，这里只做显隐与重排：
+  // 首屏先摆 3 行，之后滚到接近底部就自动再放 3 行（不用点按钮）
   var mgrid = document.getElementById('modelGrid');
   if (mgrid) {
     var mcards = [].slice.call(mgrid.querySelectorAll('.card'));
-    var mmore = document.getElementById('modelMore');
-    var mwrap = document.getElementById('modelMoreWrap');
     var mempty = document.getElementById('modelEmpty');
+    var mend = document.getElementById('modelEnd');
+    var msentinel = document.getElementById('modelSentinel');
     var mq = document.getElementById('mq');
     var msort = document.getElementById('modelSort');
-    var M_FIRST = 10, M_STEP = 20;
-    var mShown = M_FIRST, MS = 'date-desc';
+    var M_ROWS = 3;                     // 每次加载 3 行
+    var M_TOTAL = mcards.length;
     var attr = function (c, k) { return c.getAttribute(k) || ''; };
+    // 一行几张由 CSS 决定（桌面 5 / 平板 3 / 手机 2），量出来再乘 3
+    var mBatch = function () {
+      var cols = 0;
+      try { cols = (getComputedStyle(mgrid).gridTemplateColumns || '').split(' ').filter(Boolean).length; } catch (e) {}
+      if (!cols) cols = 5;
+      return Math.max(1, cols) * M_ROWS;
+    };
+    var mShown = mBatch(), MS = 'date-desc';
+    var mHits = M_TOTAL;
     var byDate = function (a, b) {
       return attr(b, 'data-date').localeCompare(attr(a, 'data-date')) || attr(b, 'data-slug').localeCompare(attr(a, 'data-slug'));
     };
@@ -2218,24 +2256,53 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         if (hit) hits++;
         c.hidden = !(hit && hits <= mShown);
       });
+      mHits = hits;
       if (mempty) mempty.hidden = hits !== 0;
-      if (mwrap) mwrap.hidden = hits <= mShown;
-      if (mmore) {
-        var rest = Math.max(0, hits - mShown);
-        mmore.textContent = rest ? '加载更多（还有 ' + rest + ' 套）' : '已全部加载';
-        mmore.disabled = !rest;
+      if (mend) {
+        mend.hidden = !(hits > 0 && hits <= mShown);
+        mend.textContent = '已全部加载 · 共 ' + hits + ' 套';
       }
+      if (msentinel) msentinel.hidden = hits <= mShown;   // 加载完了就把哨兵撤掉，别再触发
+      mFill();
     };
+    // 自动加载：再放 3 行（哨兵进入视口时触发；放完还在视野内会继续补，直到填满一屏）
+    var mLoadMore = function () {
+      if (mHits <= mShown) return false;
+      mShown += mBatch();
+      mPaint();
+      return true;
+    };
+    var mFilling = false;
+    var mFill = function () {
+      if (mFilling) return;
+      mFilling = true;
+      setTimeout(function () {
+        mFilling = false;
+        if (!msentinel || msentinel.hidden) return;
+        // 距底部不足 500px 就继续补（大屏首屏会一次补满，不用手动滚）
+        if (msentinel.getBoundingClientRect().top < innerHeight + 500 && mLoadMore()) mFill();
+      }, 60);
+    };
+    if (msentinel && 'IntersectionObserver' in window) {
+      new IntersectionObserver(function (list) {
+        for (var i = 0; i < list.length; i++) if (list[i].isIntersecting) { mLoadMore(); break; }
+      }, { rootMargin: '500px 0px' }).observe(msentinel);
+    } else if (msentinel) {
+      addEventListener('scroll', function () {
+        if (msentinel.hidden) return;
+        if (msentinel.getBoundingClientRect().top < innerHeight + 500) mLoadMore();
+      }, { passive: true });
+    }
     if (msort) msort.addEventListener('click', function (e) {
       var btn = e.target.closest('button[data-sort]');
       if (!btn) return;
       MS = btn.dataset.sort || 'date-desc';
       msort.querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b === btn); });
-      mShown = M_FIRST;
+      mShown = mBatch();
       mPaint();
     });
-    if (mq) mq.addEventListener('input', function () { mShown = M_FIRST; mPaint(); });
-    if (mmore) mmore.addEventListener('click', function () { mShown += M_STEP; mPaint(); });
+    if (mq) mq.addEventListener('input', function () { mShown = mBatch(); mPaint(); });
+    addEventListener('resize', function () { mFill(); }, { passive: true });
     mPaint();
   }
 
