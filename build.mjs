@@ -2053,9 +2053,13 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
   // ── 随便看看：从索引随机跳一套 ──
   const randBtn = document.getElementById('randomBtn');
   if (randBtn) {
-    const base = (location.pathname.includes('/set/') || location.pathname.includes('/series/') || location.pathname.includes('/tag/') || location.pathname.includes('/page/')) ? '../../' : '';
+    // 站根相对前缀直接用页面注入的 PN_REL：
+    // 原来靠路径里有没有 /set/ /tag/ 来判断，隐藏套图的地址是 /h/<token>/，一个都不匹配 →
+    // 在隐藏图集页面上会让 fetch('search-index.json') 404，"随便看看"就再也不动了
+    const base = (typeof window.PN_REL === 'string' ? window.PN_REL : '');
     randBtn.addEventListener('click', () => {
-      fetch(base + 'search-index.json').then(r => r.json()).then(d => {
+      fetch(base + 'search-index.json').then(r => r.ok ? r.json() : null).then(d => {
+        if (!d) { toast('读取索引失败，刷新后再试', false); return; }
         // 隐藏套图只有在"本机已解锁"时才参与随机（页面上那张卡带 unlocked 类）
         const pool = d.sets.filter(s => !s.locked || document.querySelector('[data-hid="' + s.slug + '"].unlocked'));
         const s = pool[Math.floor(Math.random() * pool.length)];
@@ -2068,8 +2072,8 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
         if (u) { location.href = u; return; }
         const pw = HN.pw();
         if (!pw) return;
-        sha16(pw + '|' + s.slug).then(tok => { location.href = HN.rel + 'h/' + tok + '/'; }).catch(() => {});
-      }).catch(() => {});
+        sha16(pw + '|' + s.slug).then(tok => { location.href = (base || HN.rel) + 'h/' + tok + '/'; }).catch(() => {});
+      }).catch(() => { toast('读取索引失败，刷新后再试', false); });
     });
   }
 
