@@ -884,17 +884,19 @@ function modelsIndexPage(byModel, allSets) {
   const bytes = allSets.reduce((n, s) => n + (s.bytes || 0), 0)
   const cards = entries.map(([name, list]) => {
     const pf = modelProfile(name)
-    // 封面：优先该模特最新一套**公开**图集；全是隐藏套图时用她的圆形头像当封面 ——
-    // 头像本来就是公开的，模特卡不该糊成一片（模糊只留给"这一套具体作品"）
+    // 封面：优先用后台裁好的模特头像（和模特页抬头里那张一致，整站统一、也最不容易出问题）；
+    // 没裁过头像才退回"最新一套公开图集"的封面；全隐藏且没头像时用公开的模糊小图（否则会 404）
     const latest = list.slice().sort((a, b) => cmpDateDesc(a, b))[0]
     const face = list.filter(s => !s.hidden && s.coverFile).sort((a, b) => cmpDateDesc(a, b))[0] || latest
     const b = list.reduce((n, s) => n + (s.bytes || 0), 0)
-    const facePic = face.hidden ? (avatarUrl(name) || setCoverUrl(face)) : setCoverUrl(face)
+    const avatar = avatarUrl(name)
+    const facePic = avatar || setCoverUrl(face)
+    const faceLqip = (avatar || face.hidden) ? '' : face.coverLqip
     const chips = [pf.birth, pf.height, pf.style, pf.city].filter(Boolean).slice(0, 3)
       .map(v => `<span class="tag">${esc(v)}</span>`).join('')
     return `<article class="card">
     <a class="card-link cover-link" href="model/${encodeURIComponent(name)}.html" aria-label="${esc(name)}">
-      <div class="card-cover"${face.coverLqip && !face.hidden ? ` style="background-image:url(${face.coverLqip})"` : ''}>
+      <div class="card-cover"${faceLqip ? ` style="background-image:url(${faceLqip})"` : ''}>
         ${facePic ? `<img loading="lazy" src="${facePic}" alt="${esc(name)}">` : '<div class="no-cover">无封面</div>'}
         <span class="badge">${list.length} 套</span>
       </div>
