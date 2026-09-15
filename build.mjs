@@ -451,10 +451,9 @@ function collectionPage(kind, name, sets, all, rel = '../', cloud = []) {
   const firstPage = sets.slice(0, per)
   const body = `
   <nav class="breadcrumb"><a href="${rel}index.html">首页</a><span>/</span><a href="${rel}collections.html#${kind}">${label}</a><span>/</span><span class="cur">${esc(name)}</span></nav>
-  <header class="coll-head">
-    <span class="coll-kind">${label}</span>
-    <h1>${kind === 'tag' ? '#' : ''}${esc(name)}</h1>
-  </header>
+  <div class="coll-search">
+    <input id="sq" type="search" placeholder="在「${esc(name)}」里搜索：标题 / 模特 / 标签" aria-label="在本${label}内搜索">
+  </div>
   <div class="page-head" hidden></div>
   <div class="filters" id="filters">
     <span class="sort-chips" id="sortChips" role="group" aria-label="排序方式">
@@ -1166,8 +1165,9 @@ function pageUrl(path) {
 }
 
 // ─────────────────────────── 资源 ───────────────────────────
-const STYLE = `:root{--header-h:65px;--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--line:#2a2f3a;--fg:#e8ebf0;--dim:#98a1b3;--accent:#5b8cff;--accent2:#ffb454;--radius:12px;--header-bg:rgba(15,17,21,.9)}
-html[data-theme="light"]{--bg:#f6f7f9;--panel:#fff;--panel2:#eef1f5;--line:#dde2ea;--fg:#1b1f27;--dim:#5d6879;--accent:#2f6bff;--accent2:#b3651a;--header-bg:rgba(246,247,249,.92)}
+// 封面宽高比（site.json 的 coverRatio，默认 4/5：比 3/4 矮一点，卡片整体更紧凑）
+const coverRatio = String(config.coverRatio || '4/5').trim() || '4/5'
+const STYLE = `:root{--header-h:65px;--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--line:#2a2f3a;--fg:#e8ebf0;--dim:#98a1b3;--accent:#5b8cff;--accent2:#ffb454;--radius:12px;--header-bg:rgba(15,17,21,.9)}html[data-theme="light"]{--bg:#f6f7f9;--panel:#fff;--panel2:#eef1f5;--line:#dde2ea;--fg:#1b1f27;--dim:#5d6879;--accent:#2f6bff;--accent2:#b3651a;--header-bg:rgba(246,247,249,.92)}
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{background:var(--bg);color:var(--fg);font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
@@ -1209,7 +1209,7 @@ img{max-width:100%;display:block}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
   transition:transform .2s ease,box-shadow .2s ease}
 .card:hover{transform:translateY(-3px);box-shadow:0 10px 28px rgba(0,0,0,.13)}
-.card-cover{position:relative;aspect-ratio:3/4;background:var(--panel2) center/cover no-repeat;overflow:hidden}
+.card-cover{position:relative;aspect-ratio:${coverRatio};background:var(--panel2) center/cover no-repeat;overflow:hidden}
 .card-cover img{width:100%;height:100%;object-fit:cover;transition:transform .35s ease}
 .card:hover .card-cover img{transform:scale(1.06)}
 .card:hover .card-cover img.blurred{transform:scale(1.08)}   /* 隐藏卡的糊图：放大但保持模糊 */
@@ -1251,6 +1251,9 @@ img{max-width:100%;display:block}
 .unlock-btn:hover{background:rgba(255,180,84,.22)}
 .card-locked.unlocked{cursor:pointer}
 .card-locked.unlocked .card-cover .blurred{filter:none;transform:none}
+/* 解锁后的卡片和普通卡一模一样：隐藏按钮/「已解锁」这些一律不出现
+   （JS 会把它 hidden，这里再用 CSS 兜一层，避免重画或时序问题让它闪出来） */
+[data-hid].unlocked .badge-lock,[data-hid].unlocked .unlock-btn{display:none!important}
 .card-locked.unlocked .card-title{color:var(--fg)}
 .card-locked.unlocked .unlock-btn{border-color:var(--accent);background:rgba(91,140,255,.14);color:var(--accent)}
 .side-set.is-hidden{cursor:default;opacity:.75}
@@ -1275,13 +1278,12 @@ img{max-width:100%;display:block}
 .mavatar-md{width:64px;height:64px;border-width:2px}
 .mavatar-lg{width:96px;height:96px;border-width:2px}
 .page-head.model-head h1{display:flex;align-items:center;gap:12px}
-/* ── 标签页 / 系列页抬头：和模特页同一套"名片"样式 ── */
-.coll-head{display:flex;align-items:center;gap:12px;margin:14px 0 16px;padding:14px 18px;
-  border:1px solid var(--line);border-radius:16px;
-  background:linear-gradient(180deg,rgba(91,140,255,.14),rgba(91,140,255,.035) 58%,rgba(91,140,255,0) 100%),var(--panel)}
-.coll-kind{flex:0 0 auto;font-size:12px;font-weight:600;color:var(--accent);
-  background:rgba(91,140,255,.16);border:1px solid rgba(91,140,255,.42);border-radius:999px;padding:3px 12px}
-.coll-head h1{margin:0;font-size:22px;line-height:1.25;letter-spacing:-.01em;min-width:0;overflow-wrap:anywhere}
+/* ── 标签页 / 系列页：抬头就是一个搜索框（只在本标签内搜索），不再摆标题和色块 ── */
+.coll-search{margin:14px 0 4px}
+.coll-search input{width:100%;height:40px;padding:0 15px;border-radius:12px;border:1px solid var(--line);
+  background:var(--panel);color:var(--fg);font:inherit;font-size:13.5px;outline:none}
+.coll-search input:focus{border-color:var(--accent)}
+.coll-search input::placeholder{color:var(--dim)}
 /* ── 模特页抬头：圆头像 + 名字 + 一句话自我介绍 + 作品数 + 热门标签 ──
    整块做成一张"名片"：顶部一层淡蓝渐变往下淡出，卡片自身收边，和下面的筛选/瀑布流分开 */
 .model-top{display:flex;gap:18px;align-items:center;margin:14px 0 20px;padding:16px 18px;
@@ -2058,10 +2060,19 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
     const base = (location.pathname.includes('/set/') || location.pathname.includes('/series/') || location.pathname.includes('/tag/') || location.pathname.includes('/page/')) ? '../../' : '';
     randBtn.addEventListener('click', () => {
       fetch(base + 'search-index.json').then(r => r.json()).then(d => {
-        // 隐藏套图不参与"随便看看"（除非已经解锁）
-        const pool = d.sets.filter(s => !s.locked || document.querySelector('.card-locked.unlocked[data-hid="' + s.slug + '"]'));
+        // 隐藏套图只有在"本机已解锁"时才参与随机（页面上那张卡带 unlocked 类）
+        const pool = d.sets.filter(s => !s.locked || document.querySelector('[data-hid="' + s.slug + '"].unlocked'));
         const s = pool[Math.floor(Math.random() * pool.length)];
-        if (s) location.href = base + 'set/' + encodeURIComponent(s.slug) + '/index.html';
+        if (!s) return;
+        if (!s.locked) { location.href = base + 'set/' + encodeURIComponent(s.slug) + '/index.html'; return; }
+        // 隐藏套图的真实地址是 h/<token>/，拼 set/<slug>/ 会 404 ——
+        // 优先用解锁时写在卡片上的 data-url，卡片不在本页就用记住的密码现算
+        const card = document.querySelector('[data-hid="' + s.slug + '"].unlocked');
+        const u = card && card.getAttribute('data-url');
+        if (u) { location.href = u; return; }
+        const pw = HN.pw();
+        if (!pw) return;
+        sha16(pw + '|' + s.slug).then(tok => { location.href = HN.rel + 'h/' + tok + '/'; }).catch(() => {});
       }).catch(() => {});
     });
   }
@@ -2069,7 +2080,8 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
   ${ADMIN_JS}
   // ── 列表页：全站搜索/筛选（读 search-index.json，跨分页生效）──
   const grid = document.getElementById('grid');
-  const input = document.getElementById('q');
+  // 标签页/系列页自带一个"只在本标签内搜索"的输入框；其它页面用顶栏搜索框
+  const input = document.getElementById('sq') || document.getElementById('q');
   const empty = document.getElementById('empty');
   if (grid) {
     // 范围内列表（标签页/系列页）：搜索、排序、翻页都只在这个标签/系列内进行
@@ -2083,6 +2095,8 @@ var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
       : s.series === SCOPE.name);
     // 范围内没有静态分页（page/N.html），所以永远用客户端分页
     const clearHref = SCOPE ? location.pathname : base + 'index.html';
+    // 标签页上用页面里那个搜索框，顶栏那个全局搜索就收起来，避免两个输入框打架
+    if (SCOPE) { const hs = document.querySelector('.header-search'); if (hs) hs.hidden = true; }
     let INDEX = null;
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     // 模特行：头像 + 模特名 + 日期（与静态卡片保持一致）

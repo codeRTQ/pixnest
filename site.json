@@ -3,6 +3,7 @@
   "siteSubtitle": "高质量写真图集 · 每日更新",
   "baseUrl": "",
   "setsPerPage": 20,
+  "coverRatio": "4/5",
   "previewCount": 0,
   "icp": "",
   "openlist": null,
