@@ -574,6 +574,12 @@ function cardModelRow(s, rel = '', opts = {}) {
 /** 日期显示成 2026/09/13 这种斜杠格式（datetime 属性仍用标准 ISO 写法） */
 const slashDate = (d) => String(d || '').replace(/-/g, '/')
 
+/** 锁图标：用 SVG 而不是 🔒 emoji —— emoji 自带黄色，压在琥珀色药丸上看不清；
+    SVG 用 currentColor（深色），在任何底上都清晰 */
+const LOCK_SVG = '<svg class="ic-lock" viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">'
+  + '<path d="M8 10.6V7.6a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>'
+  + '<rect x="4.6" y="10.4" width="14.8" height="9.6" rx="2.5" fill="currentColor"/></svg>'
+
 /** 卡片上的检索/排序用数据（模特页的标签筛选、排序、"下滑自动加载"都靠它）；
     张数按真实值写：隐藏套图的张数/体积在 slug 里本来就是公开的（如 xx-28p-447mb），按 0 写反而让"热门"失效 */
 const cardData = (s) => ` data-slug="${esc(s.slug)}" data-date="${esc(s.date || '')}"`
@@ -592,7 +598,7 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   ? `<article class="card card-locked" data-hid="${esc(s.slug)}"${cardData(s)}>
   <div class="card-cover locked"${s.coverLqip ? ` style="background-image:url(${s.coverLqip})"` : ''}>
     ${s.blurThumb ? `<img class="blurred" src="${blurUrl(s.slug, rel)}" alt="">` : '<div class="no-cover">🔒</div>'}
-    <span class="badge badge-lock">🔒 隐藏</span>
+    <span class="badge badge-lock">${LOCK_SVG}隐藏</span>
   </div>
   <h2 class="card-title">${esc(s.title)}</h2>
   <div class="card-model">${cardModelRow(s, rel, opts)}</div>
@@ -604,7 +610,7 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   ? `<article class="card card-locked" data-hid="${esc(s.slug)}"${s.blurThumb ? ` data-cover="${esc(s.coverThumb || '')}"` : ''}${cardData(s)}>
   <div class="card-cover locked"${s.coverLqip ? ` style="background-image:url(${s.coverLqip})"` : ''}>
     ${s.blurThumb ? `<img class="blurred"${opts.eager ? '' : ' loading="lazy"'} src="${blurUrl(s.slug, rel)}" alt="${esc(s.title)}">` : '<div class="no-cover">🔒</div>'}
-    <button class="badge badge-lock unlock-btn" title="${esc(HIDDEN_HINT)}" aria-label="${esc(s.title)}（隐藏，点这里输密码）">🔒 隐藏</button>
+    <button class="badge badge-lock unlock-btn" title="${esc(HIDDEN_HINT)}" aria-label="${esc(s.title)}（隐藏，点这里输密码）">${LOCK_SVG}隐藏</button>
   </div>
   <h2 class="card-title">${esc(s.title)}</h2>
   <div class="card-model">${cardModelRow(s, rel, opts)}</div>
@@ -1234,8 +1240,10 @@ img{max-width:100%;display:block}
 .card-locked .card-title{color:var(--dim)}
 /* 隐藏标识：实心琥珀色药丸 + 深色字，压在模糊封面上也一眼能看清（和「📌 置顶」同一套配色）
    注意要压过下面的 .unlock-btn 规则（它把按钮做成了描边淡底），所以这里写两个选择器 */
-.badge-lock,.badge-lock.unlock-btn{background:#ffb454;color:#1a1206;border:1px solid rgba(255,255,255,.5);
+.badge-lock,.badge-lock.unlock-btn{display:inline-flex;align-items:center;gap:4px;
+  background:#ffb454;color:#1a1206;border:1px solid rgba(255,255,255,.5);
   font-weight:600;padding:3px 10px;box-shadow:0 2px 10px rgba(0,0,0,.45);letter-spacing:.01em}
+.ic-lock{display:block;flex:0 0 auto}
 .lock-hint{font-size:12px;color:var(--dim)}
 .unlock-btn{font:inherit;font-size:12px;padding:4px 12px;border-radius:999px;cursor:pointer;
   border:1px solid rgba(255,180,84,.5);background:rgba(255,180,84,.12);color:var(--accent2);transition:.15s}
@@ -1706,6 +1714,8 @@ const ADMIN_JS = PUBLIC ? '' : `  // ── 本地管理开关：详情页带 ?a
 `
 
 const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwipe 画廊（静态站，无后端）
+// 锁图标：客户端渲染的卡片也要用同一个 SVG（emoji 的黄色锁在琥珀底上看不清）
+var LOCK_SVG_JS = ${JSON.stringify(LOCK_SVG)};
 (function () {
   // ── 18+ 内容确认闸门（最先执行，避免后续脚本异常导致闸门失效）──
   // 仅当页面注入了 #adultGate（site.json 的 adultGate: true）时生效；同意后记入 localStorage，一年内不再询问
@@ -1817,7 +1827,6 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
         img.classList.remove('blurred');                  // 摘掉糊图类：模糊/放大/悬停倍率全部回到普通卡片
       }
     }
-    keepText(el, 'data-badge', el.querySelector('.badge-lock'));
     keepText(el, 'data-meta', el.querySelector('.hero-meta'));
     keepText(el, 'data-b', el.querySelector('.hero-item-text b'));
     keepText(el, 'data-sub', el.querySelector('.hero-item-text span'));
@@ -1857,7 +1866,6 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       if (v !== null) setText(el, sel, v);
       el.removeAttribute(key);
     };
-    restore('data-badge', '.badge-lock');
     restore('data-meta', '.hero-meta');
     restore('data-b', '.hero-item-text b');
     restore('data-sub', '.hero-item-text span');
@@ -1868,11 +1876,11 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       if (sp) sp.textContent = sp.textContent.replace('🔓', '🔒');
     }
     if (el.getAttribute('data-addedhref')) { el.removeAttribute('href'); el.removeAttribute('data-addedhref'); }
-    // 隐藏按钮还原：文字回到「🔒 隐藏」并重新显示
+    // 隐藏按钮还原：重新显示（文字/图标不动，避免把 SVG 冲掉）
     if (el.getAttribute('data-btn-hidden')) {
       el.removeAttribute('data-btn-hidden');
       var lb = el.querySelector('.unlock-btn.badge-lock');
-      if (lb) { lb.hidden = false; lb.textContent = '🔒 隐藏'; }
+      if (lb) lb.hidden = false;
     }
     var lb2 = el.querySelector('.unlock-btn');
     if (lb2 && !lb2.classList.contains('badge-lock')) lb2.textContent = '🔓 输入密码查看';
@@ -2073,7 +2081,7 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       '<article class="card card-locked" data-hid="' + esc(s.slug) + '" data-cover="' + esc(s.cthumb || '') + '">',
       '<div class="card-cover locked">',
       (s.cover ? '<img class="blurred" loading="lazy" src="' + base + s.cover + '" alt="' + esc(s.title) + '">' : '<div class="no-cover">🔒</div>'),
-      '<span class="badge badge-lock">🔒 隐藏</span>',
+      '<span class="badge badge-lock">' + LOCK_SVG_JS + '隐藏</span>',
       '</div>',
       '<h2 class="card-title">' + esc(s.title) + '</h2>',
       '<div class="card-model">',
