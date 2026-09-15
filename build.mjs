@@ -540,6 +540,21 @@ ${ADULT_GATE}
     ${config.icp ? `<p class="icp">${esc(config.icp)}</p>` : ''}
   </div>
 </footer>
+<!-- 隐藏图集密码弹窗（毛玻璃）：点「🔒 隐藏」角标或置顶轮播里的隐藏图集时弹出 -->
+<div class="pn-modal" id="pnModal" hidden>
+  <div class="pn-mask" data-pn-close></div>
+  <div class="pn-card" role="dialog" aria-modal="true" aria-labelledby="pnTitle">
+    <h3 id="pnTitle">🔒 输入隐藏图集密码</h3>
+    <p class="pn-sub" id="pnSub">这套图已隐藏，输入密码后查看</p>
+    <input class="pn-input" id="pnInput" type="password" autocomplete="current-password" placeholder="密码" aria-label="隐藏图集密码">
+    <div class="pn-past" id="pnPast" hidden></div>
+    <p class="pn-err" id="pnErr"></p>
+    <div class="pn-actions">
+      <button type="button" class="pn-btn" id="pnCancel">取消</button>
+      <button type="button" class="pn-btn pn-btn-primary" id="pnOk">解锁</button>
+    </div>
+  </div>
+</div>
 <script src="${rel}assets/app.js?v=${ASSET_V}" defer></script>
 <script>window.PN_REL=${JSON.stringify(rel)};window.PN_HIDDEN_HINT=${JSON.stringify(HIDDEN_HINT)};window.PN_LOCK_SLUG=${JSON.stringify(lockSlugGlobal)};</script>
 </body>
@@ -567,6 +582,12 @@ const cardData = (s) => ` data-slug="${esc(s.slug)}" data-date="${esc(s.date || 
   + ` data-tags=" ${esc(s.tags.join(' '))} "`
   + ` data-title="${esc(((s.displayTitle || s.title) + ' ' + (s.model || '') + ' ' + (s.series || '') + ' ' + s.tags.join(' ') + ' ' + (s.date || '')).toLowerCase())}"`
 
+/** 卡片右上/左上角只用「置顶」和「隐藏」两种角标；张数与体积不再往封面上放 */
+const cardMetaRow = (s, rel) => `
+    ${s.dupTag && s.dupTag !== s.model ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
+    ${s.series ? `<a class="tag tag-series" href="${rel}series/${encodeURIComponent(s.series)}.html" title="查看该系列全部图集">${esc(s.series)}</a>` : ''}
+    ${s.tags.slice(0, 2).map(t => `<a class="tag tag-link" href="${rel}tag/${encodeURIComponent(t)}.html" title="查看同标签图集">${esc(t)}</a>`).join('')}`
+
 const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   // 隐藏但没配密码（构建时算不出私有地址）→ 只给一张糊图，没有任何入口
   ? `<article class="card card-locked" data-hid="${esc(s.slug)}"${cardData(s)}>
@@ -578,17 +599,17 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
   <div class="card-model">${cardModelRow(s, rel, opts)}</div>
   <div class="card-meta"><span class="lock-hint">还没设置隐藏密码</span></div>
 </article>`
+  // 隐藏但有密码：不加任何"锁定"专属样式 —— 唯一的区别是封面模糊 + 左上角一个「隐藏」按钮，
+  // 点按钮输密码；解锁后这张卡和普通卡完全一样（角标/信息行都一样）
   : s.hiddenOk
   ? `<article class="card card-locked" data-hid="${esc(s.slug)}"${s.blurThumb ? ` data-cover="${esc(s.coverThumb || '')}"` : ''}${cardData(s)}>
   <div class="card-cover locked"${s.coverLqip ? ` style="background-image:url(${s.coverLqip})"` : ''}>
     ${s.blurThumb ? `<img class="blurred"${opts.eager ? '' : ' loading="lazy"'} src="${blurUrl(s.slug, rel)}" alt="${esc(s.title)}">` : '<div class="no-cover">🔒</div>'}
-    <span class="badge badge-lock">🔒 隐藏</span>
+    <button class="badge badge-lock unlock-btn" title="${esc(HIDDEN_HINT)}" aria-label="${esc(s.title)}（隐藏，点这里输密码）">🔒 隐藏</button>
   </div>
   <h2 class="card-title">${esc(s.title)}</h2>
   <div class="card-model">${cardModelRow(s, rel, opts)}</div>
-  <div class="card-meta">
-    <button class="unlock-btn" title="${esc(HIDDEN_HINT)}">🔓 输入密码查看</button>
-    ${s.dupTag && s.dupTag !== s.model ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
+  <div class="card-meta">${cardMetaRow(s, rel)}
   </div>
 </article>`
   : `
@@ -598,17 +619,12 @@ const card = (s, rel = '', opts = {}) => (s.hidden && !s.hiddenOk)
       ${s.coverFile
         ? `<img${opts.eager ? ' fetchpriority="high"' : ' loading="lazy"'} src="${rel}set/${s.slug}/${s.coverThumb ? 'thumbs/' + s.coverThumb + verQ(s.thumbVer[s.coverThumb]) : s.coverFile}" alt="${esc(s.title)}">`
         : `<div class="no-cover">无封面</div>`}
-      <span class="badge">${s.imageCount}P</span>
-      ${s.sizeText ? `<span class="badge badge-size" title="原图总大小 ${esc(s.sizeText)}">${esc(s.sizeText)}</span>` : (s.packSize ? `<span class="badge badge-size">${esc(s.packSize)}</span>` : '')}
       ${s.pinned ? '<span class="badge badge-pin" title="置顶推荐">📌 置顶</span>' : ''}
     </div>
   </a>
   <a class="card-link title-link" href="${rel}set/${s.slug}/index.html"><h2 class="card-title">${esc(s.title)}</h2></a>
   <div class="card-model">${cardModelRow(s, rel, opts)}</div>
-  <div class="card-meta">
-    ${s.dupTag && s.dupTag !== s.model ? `<span class="tag tag-model" title="同名作品，用它区分">${esc(s.dupTag)}</span>` : ''}
-    ${s.series ? `<a class="tag tag-series" href="${rel}series/${encodeURIComponent(s.series)}.html" title="查看该系列全部图集">${esc(s.series)}</a>` : ''}
-    ${s.tags.slice(0, 2).map(t => `<a class="tag tag-link" href="${rel}tag/${encodeURIComponent(t)}.html" title="查看同标签图集">${esc(t)}</a>`).join('')}
+  <div class="card-meta">${cardMetaRow(s, rel)}
   </div>
 </article>`
 
@@ -866,21 +882,19 @@ function modelsIndexPage(byModel, allSets) {
   const bytes = allSets.reduce((n, s) => n + (s.bytes || 0), 0)
   const cards = entries.map(([name, list]) => {
     const pf = modelProfile(name)
-    // 封面：优先该模特最新一套**公开**图集；全是隐藏套图时用公开的模糊小图（否则会 404）
-    // data-hid/data-cover 挂在图片上：解锁后这张糊图会自动换成真封面（整张卡仍然点进模特页）
+    // 封面：优先该模特最新一套**公开**图集；全是隐藏套图时用她的圆形头像当封面 ——
+    // 头像本来就是公开的，模特卡不该糊成一片（模糊只留给"这一套具体作品"）
     const latest = list.slice().sort((a, b) => cmpDateDesc(a, b))[0]
     const face = list.filter(s => !s.hidden && s.coverFile).sort((a, b) => cmpDateDesc(a, b))[0] || latest
     const b = list.reduce((n, s) => n + (s.bytes || 0), 0)
+    const facePic = face.hidden ? (avatarUrl(name) || setCoverUrl(face)) : setCoverUrl(face)
     const chips = [pf.birth, pf.height, pf.style, pf.city].filter(Boolean).slice(0, 3)
       .map(v => `<span class="tag">${esc(v)}</span>`).join('')
     return `<article class="card">
     <a class="card-link cover-link" href="model/${encodeURIComponent(name)}.html" aria-label="${esc(name)}">
-      <div class="card-cover"${face.coverLqip ? ` style="background-image:url(${face.coverLqip})"` : ''}>
-        ${setCoverUrl(face)
-          ? `<img loading="lazy"${face.hidden ? ` class="blurred" data-hid="${esc(face.slug)}"${face.coverThumb ? ` data-cover="${esc(face.coverThumb)}"` : ''}` : ''} src="${setCoverUrl(face)}" alt="${esc(name)}">`
-          : '<div class="no-cover">无封面</div>'}
+      <div class="card-cover"${face.coverLqip && !face.hidden ? ` style="background-image:url(${face.coverLqip})"` : ''}>
+        ${facePic ? `<img loading="lazy" src="${facePic}" alt="${esc(name)}">` : '<div class="no-cover">无封面</div>'}
         <span class="badge">${list.length} 套</span>
-        ${b ? `<span class="badge badge-size">${esc(fmtSize(b))}</span>` : ''}
       </div>
     </a>
     <a class="card-link title-link" href="model/${encodeURIComponent(name)}.html"><h2 class="card-title">${esc(name)}</h2></a>
@@ -923,7 +937,6 @@ function seriesIndexPage(bySeries, allSets) {
           ? `<img loading="lazy"${face.hidden ? ` class="blurred" data-hid="${esc(face.slug)}"${face.coverThumb ? ` data-cover="${esc(face.coverThumb)}"` : ''}` : ''} src="${setCoverUrl(face)}" alt="${esc(name)}">`
           : '<div class="no-cover">无封面</div>'}
         <span class="badge">${list.length} 套</span>
-        ${b ? `<span class="badge badge-size">${esc(fmtSize(b))}</span>` : ''}
       </div>
       <h2 class="card-title">${esc(name)}</h2>
     </a>
@@ -1220,7 +1233,6 @@ img{max-width:100%;display:block}
 .card-locked .card-cover .blurred,.blurred{filter:blur(2px) saturate(.8) brightness(.92);transform:scale(1.06);
   transform-origin:center;backface-visibility:hidden}
 .card-locked .card-title{color:var(--dim)}
-.card-locked .card-meta{justify-content:space-between}
 .badge-lock{background:rgba(0,0,0,.66);color:#ffd9a0;border:1px solid rgba(255,180,84,.45)}
 .lock-hint{font-size:12px;color:var(--dim)}
 .unlock-btn{font:inherit;font-size:12px;padding:4px 12px;border-radius:999px;cursor:pointer;
@@ -1252,8 +1264,11 @@ img{max-width:100%;display:block}
 .mavatar-md{width:64px;height:64px;border-width:2px}
 .mavatar-lg{width:96px;height:96px;border-width:2px}
 .page-head.model-head h1{display:flex;align-items:center;gap:12px}
-/* ── 模特页抬头：圆头像 + 名字 + 一句话自我介绍 + 作品数 + 6 个热门标签 ── */
-.model-top{display:flex;gap:18px;align-items:center;margin:14px 0 16px}
+/* ── 模特页抬头：圆头像 + 名字 + 一句话自我介绍 + 作品数 + 热门标签 ──
+   整块做成一张"名片"：顶部一层淡蓝渐变往下淡出，卡片自身收边，和下面的筛选/瀑布流分开 */
+.model-top{display:flex;gap:18px;align-items:center;margin:14px 0 20px;padding:16px 18px;
+  border:1px solid var(--line);border-radius:16px;
+  background:linear-gradient(180deg,rgba(91,140,255,.14),rgba(91,140,255,.035) 58%,rgba(91,140,255,0) 100%),var(--panel)}
 .mt-art{flex:0 0 auto;width:88px;height:88px;border-radius:24px;overflow:hidden;background:var(--panel2);
   border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
   box-shadow:0 14px 30px -20px rgba(0,0,0,.55)}
@@ -1600,6 +1615,41 @@ html[data-theme="light"] .pf-quote{background:linear-gradient(90deg,rgba(47,107,
 /* 18+ 闸门 */
 .adult-gate{position:fixed;inset:0;z-index:500;background:rgba(6,8,12,.97);display:flex;align-items:center;justify-content:center;padding:24px}
 .adult-gate[hidden]{display:none}
+/* ── 密码弹窗（毛玻璃）：替代 window.prompt，能记住输过的密码 ── */
+.pn-modal{position:fixed;inset:0;z-index:800;display:flex;align-items:center;justify-content:center;padding:20px}
+.pn-modal[hidden]{display:none}
+.pn-mask{position:absolute;inset:0;background:rgba(8,10,14,.42);
+  -webkit-backdrop-filter:blur(10px) saturate(120%);backdrop-filter:blur(10px) saturate(120%)}
+.pn-card{position:relative;width:100%;max-width:382px;border-radius:18px;padding:22px 22px 18px;
+  background:rgba(23,26,33,.72);border:1px solid rgba(255,255,255,.14);
+  -webkit-backdrop-filter:blur(22px) saturate(150%);backdrop-filter:blur(22px) saturate(150%);
+  box-shadow:0 30px 70px -30px rgba(0,0,0,.85),inset 0 1px 0 rgba(255,255,255,.06);
+  animation:pnIn .18s ease}
+html[data-theme="light"] .pn-card{background:rgba(255,255,255,.8);border-color:rgba(0,0,0,.08);
+  box-shadow:0 24px 60px -28px rgba(20,30,60,.45)}
+@keyframes pnIn{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+.pn-card h3{margin:0 0 6px;font-size:16px;letter-spacing:.01em}
+.pn-sub{margin:0 0 14px;font-size:12.5px;color:var(--dim);line-height:1.65}
+.pn-input{width:100%;height:42px;padding:0 14px;border-radius:11px;border:1px solid var(--line);
+  background:rgba(0,0,0,.22);color:var(--fg);font:inherit;font-size:14px;outline:none;transition:.15s}
+html[data-theme="light"] .pn-input{background:rgba(0,0,0,.04)}
+.pn-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,140,255,.2)}
+.pn-past{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0 0}
+.pn-past-label{font-size:11.5px;color:var(--dim)}
+.pn-past-btn{font:inherit;font-size:12px;padding:3px 10px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--dim)}
+.pn-past-btn:hover{color:var(--accent);border-color:var(--accent)}
+.pn-err{margin:10px 0 0;font-size:12.5px;color:#ff9090;min-height:17px}
+.pn-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
+.pn-btn{font:inherit;font-size:13.5px;height:36px;padding:0 18px;border-radius:10px;cursor:pointer;
+  border:1px solid var(--line);background:transparent;color:var(--fg);transition:.15s}
+.pn-btn:hover{border-color:var(--accent);color:var(--accent)}
+.pn-btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.pn-btn-primary:hover{filter:brightness(1.08);color:#fff}
+.pn-btn[disabled]{opacity:.55;cursor:default}
+/* 隐藏卡的左上角「隐藏」按钮：点它输密码 */
+.badge-lock{cursor:pointer;font:inherit;font-size:11px;line-height:1.6}
+.badge-lock:hover{background:rgba(255,180,84,.22)}
 .ag-card{max-width:560px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px}
 .ag-card h2{margin:0 0 12px;font-size:18px}
 .ag-card p{margin:8px 0;font-size:14px;line-height:1.8}
@@ -1712,11 +1762,23 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
   };
   var HN = {
     key: 'pn-hidden-pw',
+    histKey: 'pn-hidden-pws',            // 用过的密码（本机，最多留 5 个）
     rel: (typeof window.PN_REL === 'string' ? window.PN_REL : ''),
     hint: window.PN_HIDDEN_HINT || '这套图已隐藏，输入密码后查看',
     pw: function () { try { return localStorage.getItem(HN.key) || ''; } catch (e) { return ''; } },
     save: function (p) { try { localStorage.setItem(HN.key, p); } catch (e) {} },
     forget: function () { try { localStorage.removeItem(HN.key); } catch (e) {} },
+    list: function () {
+      try { var a = JSON.parse(localStorage.getItem(HN.histKey) || '[]'); return Object.prototype.toString.call(a) === '[object Array]' ? a : []; } catch (e) { return []; }
+    },
+    remember: function (p) {
+      if (!p) return;
+      try {
+        var a = HN.list().filter(function (x) { return x !== p; });
+        a.unshift(p);
+        localStorage.setItem(HN.histKey, JSON.stringify(a.slice(0, 5)));
+      } catch (e) {}
+    },
   };
   var hexBuf = function (buf) {
     return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
@@ -1763,9 +1825,13 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
     keepText(el, 'data-b', el.querySelector('.hero-item-text b'));
     keepText(el, 'data-sub', el.querySelector('.hero-item-text span'));
     keepText(el, 'data-hint', el.querySelector('.lock-hint'));
-    setText(el, '.badge-lock', '🔓 已解锁');
+    // 解锁后这张卡就是普通卡：不显示「已解锁」，也不留「查看这套图」按钮
+    var lockBtn = el.querySelector('.badge-lock');
+    if (lockBtn && lockBtn.classList.contains('unlock-btn')) {
+      keepAttr(el, 'data-btn-hidden', '1');
+      lockBtn.hidden = true;
+    }
     setText(el, '.lock-hint', '已解锁');
-    setText(el, '.unlock-btn', '🔓 查看这套图');
     setText(el, '.hero-meta', '已解锁，点开就能看');
     var b = el.querySelector('.hero-item-text b');
     if (b) b.textContent = b.textContent.replace(/^🔒\\s*/, '');
@@ -1805,7 +1871,14 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
       if (sp) sp.textContent = sp.textContent.replace('🔓', '🔒');
     }
     if (el.getAttribute('data-addedhref')) { el.removeAttribute('href'); el.removeAttribute('data-addedhref'); }
-    setText(el, '.unlock-btn', '🔓 输入密码查看');   // 按钮文字也要回到"输密码"状态
+    // 隐藏按钮还原：文字回到「🔒 隐藏」并重新显示
+    if (el.getAttribute('data-btn-hidden')) {
+      el.removeAttribute('data-btn-hidden');
+      var lb = el.querySelector('.unlock-btn.badge-lock');
+      if (lb) { lb.hidden = false; lb.textContent = '🔒 隐藏'; }
+    }
+    var lb2 = el.querySelector('.unlock-btn');
+    if (lb2 && !lb2.classList.contains('badge-lock')) lb2.textContent = '🔓 输入密码查看';
   };
   // 头部 🔒/🔓 按钮：跟着"本机是否记住密码"换样式，已经解锁时点它就是重新上锁
   var syncLockBtn = function () {
@@ -1847,23 +1920,71 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
   };
   // 客户端渲染出来的卡片（搜索/排序后重画）也要跟着解锁
   window.PN_unlockCards = unlockCards;
-  var askHidden = function (slug) {
-    var keep = HN.pw();
-    var pw = window.prompt(HN.hint + (keep ? '（直接回车＝用这台设备记住的密码）' : ''), keep || '');
-    if (pw === null) return;
-    pw = String(pw).trim() || keep;
-    if (!pw) return;
-    toast('正在校验密码…');
-    sha16(pw + '|' + slug).then(function (tok) {
+  // ── 密码弹窗（毛玻璃）：替代 window.prompt ──
+  // 打开时会把上次用过的密码填好，并把最近用过的几个列在下面点一下就填
+  var PM = {
+    box: document.getElementById('pnModal'),
+    input: document.getElementById('pnInput'),
+    sub: document.getElementById('pnSub'),
+    past: document.getElementById('pnPast'),
+    err: document.getElementById('pnErr'),
+    ok: document.getElementById('pnOk'),
+    slug: '',
+  };
+  var pmErr = function (msg) { if (PM.err) PM.err.textContent = msg || ''; };
+  var pmPast = function () {
+    if (!PM.past) return;
+    PM.past.innerHTML = '';
+    var hist = HN.list();
+    if (!hist.length) { PM.past.hidden = true; return; }
+    // 用 DOM 拼，别用字符串拼 HTML（这里的 esc() 在外层作用域，取不到）
+    var lab = document.createElement('span');
+    lab.className = 'pn-past-label';
+    lab.textContent = '用过的密码';
+    PM.past.appendChild(lab);
+    hist.forEach(function (p) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pn-past-btn';
+      b.setAttribute('data-pw', p);
+      b.textContent = p;
+      PM.past.appendChild(b);
+    });
+    PM.past.hidden = false;
+  };
+  var pmOpen = function (slug) {
+    if (!PM.box) return false;
+    PM.slug = slug;
+    if (PM.sub) PM.sub.textContent = HN.hint;
+    if (PM.input) { PM.input.value = HN.pw() || HN.list()[0] || ''; PM.input.removeAttribute('readonly'); }
+    pmErr('');
+    pmPast();
+    PM.box.hidden = false;
+    document.documentElement.style.overflow = 'hidden';
+    setTimeout(function () { try { PM.input.focus(); PM.input.select(); } catch (e) {} }, 30);
+    return true;
+  };
+  var pmClose = function () {
+    if (!PM.box) return;
+    PM.box.hidden = true;
+    document.documentElement.style.overflow = '';
+    if (PM.input) PM.input.value = '';
+    pmErr('');
+  };
+  var pmSubmit = function () {
+    var pw = (PM.input && PM.input.value || '').trim();
+    if (!pw) { pmErr('请输入密码'); return; }
+    if (!PM.slug) { pmErr('页面信息缺失，刷新后重试'); return; }
+    if (PM.ok) PM.ok.disabled = true;
+    pmErr('正在校验…');
+    sha16(pw + '|' + PM.slug).then(function (tok) {
       var url = HN.rel + 'h/' + tok + '/';
       return probe(url).then(function (ok) {
-        if (!ok) {
-          HN.forget();
-          if (window.confirm('密码不对，重新输入？')) askHidden(slug);
-          else toast('已取消', false);
-          return;
-        }
+        if (PM.ok) PM.ok.disabled = false;
+        if (!ok) { pmErr('密码不对，再试一次'); try { PM.input.select(); } catch (e) {} return; }
         HN.save(pw);
+        HN.remember(pw);                       // 记住这次输的密码
+        pmClose();
         // 故意不跳详情页：就地解锁，用户自己点卡片进（这样能连着看下一套）
         unlockCards().then(function (n) {
           syncLockBtn();
@@ -1871,7 +1992,38 @@ const APP = `// 前端交互：列表页搜索 + 详情页流式加载/PhotoSwip
                   : '✓ 密码正确，已记住（回到列表即可查看）', true);
         });
       });
-    }).catch(function () { toast('当前浏览器不支持（需要 HTTPS）', false); });
+    }).catch(function () {
+      if (PM.ok) PM.ok.disabled = false;
+      pmErr('当前浏览器不支持（需要 HTTPS）');
+    });
+  };
+  if (PM.box) {
+    if (PM.ok) PM.ok.addEventListener('click', pmSubmit);
+    var pmCancel = document.getElementById('pnCancel');
+    if (pmCancel) pmCancel.addEventListener('click', function () { pmClose(); toast('已取消', false); });
+    var pmMask = PM.box.querySelector('[data-pn-close]');
+    if (pmMask) pmMask.addEventListener('click', function () { pmClose(); });
+    if (PM.past) PM.past.addEventListener('click', function (e) {
+      var b = e.target.closest('.pn-past-btn');
+      if (!b) return;
+      if (PM.input) { PM.input.value = b.getAttribute('data-pw') || ''; PM.input.focus(); }
+      pmErr('');
+    });
+    if (PM.input) PM.input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); pmSubmit(); }
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !PM.box.hidden) pmClose();
+    });
+  }
+  var askHidden = function (slug) {
+    if (pmOpen(slug)) return;                  // 正常走毛玻璃弹窗
+    // 兜底（老浏览器/结构异常）：退回原生 prompt
+    var pw = window.prompt(HN.hint, HN.pw() || '');
+    if (pw === null || !String(pw).trim()) return;
+    PM.slug = slug;
+    if (PM.input) PM.input.value = String(pw).trim();
+    pmSubmit();
   };
   document.addEventListener('click', function (e) {
     var btn = e.target.closest('.unlock-btn');
