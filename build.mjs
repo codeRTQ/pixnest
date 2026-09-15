@@ -781,20 +781,22 @@ function profileBits(pf = {}) {
   })
   return { parts, socials }
 }
-/** 模特资料 → 简历式的字段列表（左标右值，两列排；没填任何字段就返回空串） */
-function profileResumeHtml(pf = {}) {
+/** 模特资料 → 一句话自我介绍（放在名字下面，紧凑一行；没有任何字段就返回空串） */
+function profileIntroHtml(pf = {}) {
   const { socials } = profileBits(pf)
-  const LABEL = { sign: '星座', city: '城市', style: '风格', other: '简介' }
-  const rows = []
-  PF_ORDER.forEach(([k, label]) => {
-    const v = String(pf[k] || '').trim()
-    if (!v) return
-    const lab = label || LABEL[k] || ''
-    // 简历式排版里左边已经有「出生」标签了，值就保持「1998 年」不再补字
-    rows.push(`<div class="cv-row${v.length > 26 ? ' cv-wide' : ''}"><dt>${esc(lab)}</dt><dd>${esc(v)}</dd></div>`)
-  })
-  if (!rows.length && !socials.length) return ''
-  return `<dl class="mt-cv">${rows.join('')}</dl>`
+  const parts = []
+  const add = (v) => { const s = String(v || '').trim(); if (s) parts.push(s) }
+  add(pf.other)                                   // 先说来头：人气 Coser / 写真模特
+  if (pf.birth) add(`${String(pf.birth).trim().replace(/\s*年$/, '')} 年出生`)
+  add(pf.sign)
+  if (pf.city) add(`来自${String(pf.city).trim()}`)
+  if (pf.height) add(`身高 ${String(pf.height).trim()}`)
+  if (pf.weight) add(`体重 ${String(pf.weight).trim()}`)
+  if (pf.measure) add(`三围 ${String(pf.measure).trim()}`)
+  if (pf.shoes) add(`鞋码 ${String(pf.shoes).trim()}`)
+  if (pf.style) add(`${String(pf.style).trim()}风格`)
+  if (!parts.length && !socials.length) return ''
+  return (parts.length ? `<p class="mt-intro">${esc(parts.join('，'))}。</p>` : '')
     + (socials.length ? `<p class="mt-social">${socials.join('')}</p>` : '')
 }
 
@@ -824,12 +826,11 @@ function modelPage(name, list, rel = '../') {
     <div class="mt-art">${avatarHtml(name, rel, 'lg') || (setCoverUrl(list[0], rel) ? `<img loading="lazy" src="${setCoverUrl(list[0], rel)}" alt="${esc(name)}">` : '<span class="mt-ph">👤</span>')}</div>
     <div class="mt-main">
       <h1>${esc(name)}</h1>
+      ${profileIntroHtml(pf)}
       <p class="mt-stats">共 <b>${list.length}</b> 套作品</p>
-      ${profileResumeHtml(pf)}
       ${(seriesList.length || tagList.length) ? `<div class="mt-chips">
         ${seriesList.map(n => `<a class="cloud-chip" href="${rel}series/${encodeURIComponent(n)}.html">${esc(n)}<span>${list.filter(s => s.series === n).length}</span></a>`).join('')}
         ${tagList.map(([t, n]) => `<a class="cloud-chip cloud-tag" href="${rel}tag/${encodeURIComponent(t)}.html">#${esc(t)}<span>${n}</span></a>`).join('')}
-        ${allTags.length > tagList.length ? `<a class="cloud-chip cloud-tag cloud-more" href="${rel}collections.html">全部标签 →</a>` : ''}
       </div>` : ''}
     </div>
   </header>
@@ -1250,30 +1251,24 @@ img{max-width:100%;display:block}
 .mavatar-md{width:64px;height:64px;border-width:2px}
 .mavatar-lg{width:96px;height:96px;border-width:2px}
 .page-head.model-head h1{display:flex;align-items:center;gap:12px}
-/* ── 模特页抬头：圆头像 + 名字 + 作品数 + 简历式资料 + 6 个热门标签 ── */
-.model-top{display:flex;gap:20px;align-items:flex-start;margin:14px 0 18px}
-.mt-art{flex:0 0 auto;width:104px;height:104px;border-radius:26px;overflow:hidden;background:var(--panel2);
+/* ── 模特页抬头：圆头像 + 名字 + 一句话自我介绍 + 作品数 + 6 个热门标签 ── */
+.model-top{display:flex;gap:18px;align-items:center;margin:14px 0 16px}
+.mt-art{flex:0 0 auto;width:88px;height:88px;border-radius:24px;overflow:hidden;background:var(--panel2);
   border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
   box-shadow:0 14px 30px -20px rgba(0,0,0,.55)}
 .mt-art img{width:100%;height:100%;object-fit:cover;display:block}
 .mt-art .mavatar-lg{width:100%;height:100%;border:0;border-radius:0}
-.mt-ph{font-size:34px;color:var(--dim)}
+.mt-ph{font-size:30px;color:var(--dim)}
 .mt-main{min-width:0;flex:1}
-.mt-main h1{margin:0 0 4px;font-size:24px;line-height:1.25;letter-spacing:-.01em}
-.mt-stats{margin:0;color:var(--dim);font-size:13px;line-height:1.7}
-.mt-stats b{color:var(--fg);font-weight:600}
-/* 简历式资料：左标右值，桌面两列 / 手机一列 */
-.mt-cv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 26px;margin:12px 0 0;
-  padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
-.cv-row{display:flex;gap:10px;align-items:baseline;min-width:0;font-size:12.5px;line-height:1.8}
-.cv-row dt{flex:0 0 3.2em;color:var(--dim)}
-.cv-row dd{margin:0;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cv-row.cv-wide{grid-column:1/-1}
-.cv-row.cv-wide dd{white-space:normal;text-overflow:clip}
-.mt-social{margin:8px 0 0;font-size:12.5px;color:var(--dim);display:flex;flex-wrap:wrap;gap:4px 14px}
+.mt-main h1{margin:0;font-size:23px;line-height:1.25;letter-spacing:-.01em}
+/* 一句话自我介绍：名字正下方，浅灰一行，窄屏自动换行 */
+.mt-intro{margin:5px 0 0;color:var(--dim);font-size:13px;line-height:1.7;max-width:66ch}
+.mt-stats{margin:7px 0 0;color:var(--dim);font-size:12.5px;line-height:1.6}
+.mt-stats b{color:var(--accent);font-weight:600}
+.mt-social{margin:6px 0 0;font-size:12.5px;color:var(--dim);display:flex;flex-wrap:wrap;gap:3px 14px}
 .mt-social a{color:var(--accent);text-decoration:none}
 .mt-social a:hover{text-decoration:underline}
-.mt-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.mt-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
 .mt-chips .cloud-chip{padding:4px 11px;font-size:12.5px;border-radius:999px}
 .mt-chips .cloud-chip span{padding:0 7px;font-size:11.5px}
 .cloud-tag{color:var(--dim)}
@@ -1629,13 +1624,11 @@ html[data-theme="light"] .pf-quote{background:linear-gradient(90deg,rgba(47,107,
   /* 模特页：头像缩小、搜索框独占一行，筛选行不再吸顶（两行吸顶太占屏） */
   .model-top{gap:13px;margin:12px 0 14px}
   .mt-art{width:72px;height:72px;border-radius:20px}
-  .mt-main h1{font-size:19px;margin:0 0 3px}
-  .mt-stats{font-size:12.5px}
-  .mt-cv{grid-template-columns:repeat(2,minmax(0,1fr));gap:3px 14px;padding:10px 12px;margin-top:10px}
-  .cv-row{font-size:12px;gap:8px;line-height:1.75}
-  .cv-row dt{flex:0 0 2.9em}
+  .mt-main h1{font-size:19px}
+  .mt-intro{font-size:12.5px;margin-top:4px}
+  .mt-stats{font-size:12px;margin-top:6px}
   .mt-social{font-size:12px}
-  .mt-chips{margin-top:8px;gap:5px}
+  .mt-chips{margin-top:9px;gap:5px}
   .mt-chips .cloud-chip{padding:3px 10px;font-size:12px}
   .mt-chips .cloud-chip span{padding:0 6px;font-size:11px}
   #modelFilters{position:static;padding:10px 0}
